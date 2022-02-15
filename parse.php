@@ -15,6 +15,8 @@ define("RESULT_ERR_OTHER_SYNTAX", 23);
 
 define("RESULT_ERR_INTERNAL", 99);
 
+ini_set('display_errors', 'stderr');
+
 function strip_comment($line) {
     $index = strpos($line, "#");
     if ($index === false) {
@@ -28,7 +30,7 @@ if ($argc == 2 && strcmp("--help", $argv[1]) == 0) {
     exit(RESULT_OK);
 }
 else if ($argc >= 2) {
-    //TODO print error msg to stderr
+    echo "Unexpected arguments, see parse.php --help for usage\n";
     exit(RESULT_ERR_INVALID_ARGS);
 }
 
