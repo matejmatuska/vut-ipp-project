@@ -33,7 +33,7 @@ else if ($argc >= 2) {
 }
 
 function check_var($var) {
-    return preg_match("/^[GLT]F@[\w\-$&%*!?]+$/", $var);
+    return preg_match("/^[GLT]F@[a-zA-Z_\-$&%*!?][\w\-$&%*!?]*$/", $var);
 }
 
 function check_label($label) {
