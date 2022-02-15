@@ -37,7 +37,7 @@ function check_var($var) {
 }
 
 function check_label($label) {
-    return preg_match("/^[\w\-$&%*!?]+$/", $label);
+    return preg_match("/^[a-zA-Z_\-$&%*!?][\w\-$&%*!?]*$/", $label);
 }
 
 function check_const($const) {
