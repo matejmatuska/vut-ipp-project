@@ -42,31 +42,52 @@ function check_label($label) {
     return preg_match("/^[a-zA-Z_\-$&%*!?][\w\-$&%*!?]*$/", $label);
 }
 
+function check_type($type) {
+    return $type == "string" || $type == "int" || $type == "bool" || $type == "nil";
+}
+
 function check_const($const) {
-    return preg_match("/^int@\-?[1-9]\d*$/", $const)
-        || preg_match("/^string@[\x{000}-\x{3E7}]*/u", $const)
+    return preg_match("/^int@[+-]?\d+$/", $const)
+        //|| preg_match("/^string@[\x{000}-\x{3E7}]*$/u", $const)
+        || preg_match('/^string@(\\\\\d\d\d|[^\x00-\x20\x23\x5C])*$/u', $const)
         || $const == "bool@true" || $const == "bool@false"
         || $const == "nil@nil";
 }
 
 function check_symb($symb) {
     // const or var
-    return (check_var($symb) !== 0) || check_const($symb);
+    return (check_var($symb) || check_const($symb));
+}
+
+function xml_convert_special_chars($string) {
+    $patterns = array("/&/", "/</", "/>/");
+    $replacements = array("&amp;", "&lt;", "&gt;");
+    return preg_replace($patterns, $replacements, $string);
 }
 
 function xml_gen_var($instr_xml, $index, $value) {
-    $arg1 = $instr_xml->addChild("arg".$index, $value);
+    $value = xml_convert_special_chars($value);
+    //echo "here: ".$value."\n";
+    $arg1 = $instr_xml->addChild("arg".$index + 1, $value);
     $arg1->addAttribute("type", "var");
 }
 
 function xml_gen_label($instr_xml, $index, $value) {
-    $arg1 = $instr_xml->addChild("arg".$index, $value);
+    $arg1 = $instr_xml->addChild("arg".$index + 1, $value);
     $arg1->addAttribute("type", "label");
 }
 
+function xml_gen_type($instr_xml, $index, $value) {
+    $arg1 = $instr_xml->addChild("arg".$index + 1, $value);
+    $arg1->addAttribute("type", "type");
+}
+
 function xml_gen_const($instr_xml, $index, $value) {
-    $type_and_val = explode('@', $value);
-    $arg1 = $instr_xml->addChild("arg".$index, $type_and_val[1]);
+    $type_and_val = explode('@', $value, 2);
+    if ($type_and_val[1] == "string") {
+        xml_convert_special_chars(type_and_val[1]);
+    }
+    $arg1 = $instr_xml->addChild("arg".$index + 1, $type_and_val[1]);
     $arg1->addAttribute("type", $type_and_val[0]);
 }
 
@@ -77,7 +98,7 @@ function xml_gen_symb($instr_xml, $index, $value) {
     } elseif (check_const($value)) {
         xml_gen_const($instr_xml, $index, $value);
     } else {
-        exit(RESULT_ERR_INVALID_ARGS);
+        exit(RESULT_ERR_OTHER_SYNTAX);
     }
 }
 
@@ -87,89 +108,87 @@ $xml = new SimpleXMLElement(
     '<?xml version="1.0" encoding="UTF-8"?><program></program>');
 $xml->addAttribute('language', 'IPPcode22');
 
-$order = 1;
-while ($line = fgets(STDIN)) {
-    $line = strip_comment($line);
-    if ($line == "")
-        continue; // ignore empty lines (the ones containing just comment)
-
-    $line = trim($line);
-
-    if (!$has_header) {
-        if ($line == ".IPPcode22") {
-            $has_header = true;
-            continue;
-        } else {
-            exit(RESULT_ERR_MISSING_HEADER);
-        }
-    }
-
-    //echo ($line)."\n";
-    $split = preg_split("/\s+/", $line);
-    $opcode = strtoupper($split[0]);
-
-    $instr = $xml->addChild('instruction');
-    $instr->addAttribute('order', $order++);
+function parse_instr($opcode, $args, $xml_parent, $order) {
+    $instr = $xml_parent->addChild('instruction');
+    $instr->addAttribute('order', $order);
     $instr->addAttribute('opcode', $opcode);
+
     switch ($opcode) {
 
         // var
         case "DEFVAR":
         case "POPS":
-            if (count($split) != 2)
+            if (count($args) != 1)
                 exit(RESULT_ERR_OTHER_SYNTAX);
 
-            if (check_var($split[1]) === 0)
+            if (check_var($args[0]) == 0)
                 exit(RESULT_ERR_OTHER_SYNTAX);
 
-            xml_gen_var($instr, 1, $split[1]);
+            xml_gen_var($instr, 0, $args[0]);
             break;
 
         // var symb
+        case "NOT":
         case "MOVE":
         case "INT2CHAR":
         case "STRLEN":
         case "TYPE":
-            if (count($split) != 3)
-                exit(RESULT_ERR_MISSING_ARG);
+            if (count($args) != 2)
+                exit(RESULT_ERR_OTHER_SYNTAX);
 
-            check_var($split[1]);
-            check_symb($split[2]);
-            xml_gen_var($instr, 1, $split[1]);
-            xml_gen_symb($instr, 2, $split[2]);
+            if (check_var($args[0]) == 0)
+                exit(RESULT_ERR_OTHER_SYNTAX);
+            if (check_symb($args[1]) == 0)
+                exit(RESULT_ERR_OTHER_SYNTAX);
+
+            xml_gen_var($instr, 0, $args[0]);
+            xml_gen_symb($instr, 1, $args[1]);
             break;
 
         // label
         case "CALL":
         case "LABEL":
         case "JUMP":
-            if (count($split) != 2)
-                exit(RESULT_ERR_MISSING_ARG);
+            if (count($args) != 1)
+                exit(RESULT_ERR_OTHER_SYNTAX);
 
-            check_label($split[1]);
-            xml_gen_label($instr, 1, $split[1]);
+            if (check_label($args[0]) == 0)
+                exit(RESULT_ERR_OTHER_SYNTAX);
+
+            xml_gen_label($instr, 0, $args[0]);
             break;
 
-        // label sym1 sym2
+        // label sym0 sym2
         case "JUMPIFEQ":
         case "JUMPIFNEQ":
-            if (count($split) != 4)
-                exit(RESULT_ERR_MISSING_ARG);
+            if (count($args) != 3)
+                exit(RESULT_ERR_OTHER_SYNTAX);
 
-            check_label($split[1]);
-            check_symb($split[2]);
-            check_symb($split[3]);
-            xml_gen_label($instr, 1, $split[1]);
-            xml_gen_symb($instr, 2, $split[2]);
-            xml_gen_symb($instr, 3, $split[3]);
+            if (check_label($args[0]) == 0)
+                exit(RESULT_ERR_OTHER_SYNTAX);
+            if (check_symb($args[1]) == 0)
+                exit(RESULT_ERR_OTHER_SYNTAX);
+            if (check_symb($args[2]) == 0)
+                exit(RESULT_ERR_OTHER_SYNTAX);
+
+            xml_gen_label($instr, 0, $args[0]);
+            xml_gen_symb($instr, 1, $args[1]);
+            xml_gen_symb($instr, 2, $args[2]);
             break;
 
         // var type
         case "READ":
-            if (count($split) != 3)
-                exit(RESULT_ERR_MISSING_ARG);
+            if (count($args) != 2)
+                exit(RESULT_ERR_OTHER_SYNTAX);
 
-            check_var($split[1]);
+            if (check_var($args[0]) == 0)
+                exit(RESULT_ERR_OTHER_SYNTAX);
+
+            if (check_type($args[1]) == 0)
+                exit(RESULT_ERR_OTHER_SYNTAX);
+
+            xml_gen_var($instr, 0, $args[0]);
+            xml_gen_type($instr, 1, $args[1]);
             //TODO type
             break;
 
@@ -178,10 +197,14 @@ while ($line = fgets(STDIN)) {
         case "WRITE":
         case "EXIT":
         case "DPRINT":
-            if (count($split) != 2)
-                exit(RESULT_ERR_MISSING_ARG);
-            check_symb($split[1]);
-            xml_gen_symb($instr, 1, $split[1]);
+            if (count($args) != 1)
+                exit(RESULT_ERR_OTHER_SYNTAX);
+
+            if (check_symb($args[0]) == 0) {
+                exit(RESULT_ERR_OTHER_SYNTAX);
+            }
+
+            xml_gen_symb($instr, 0, $args[0]);
             break;
 
         // no params
@@ -190,46 +213,70 @@ while ($line = fgets(STDIN)) {
         case "POPFRAME":
         case "RETURN":
         case "BREAK":
-            if (count($split) != 1)
-                exit(RESULT_ERR_MISSING_ARG);
+            if (count($args) != 0)
+                exit(RESULT_ERR_OTHER_SYNTAX);
             break;
 
-        // var sym1 sym2
+        // var sym0 sym2
         case "ADD":
         case "SUB":
         case "MUL":
         case "IDIV":
-
         case "LT":
         case "GT":
         case "EQ":
-
         case "AND":
         case "OR":
-        case "NOT":
-
         case "STRI2INT":
         case "GETCHAR":
         case "SETCHAR":
         case "CONCAT":
-            if (count($split) != 4)
+            if (count($args) != 3)
                 exit(RESULT_ERR_OTHER_SYNTAX);
 
-            check_var($split[1]);
-            check_symb($split[2]);
-            check_symb($split[3]);
+            if (check_var($args[0]) == 0)
+                exit(RESULT_ERR_OTHER_SYNTAX);
+            if (check_symb($args[1]) == 0)
+                exit(RESULT_ERR_OTHER_SYNTAX);
+            if (check_symb($args[2]) == 0)
+                exit(RESULT_ERR_OTHER_SYNTAX);
 
-            xml_gen_var($instr, 1, $split[1]);
-            xml_gen_symb($instr, 2, $split[2]);
-            xml_gen_symb($instr, 3, $split[3]);
+            xml_gen_var($instr, 0, $args[0]);
+            xml_gen_symb($instr, 1, $args[1]);
+            xml_gen_symb($instr, 2, $args[2]);
             break;
 
         default:
-            echo "Unhandled or unrecognized instruction: ".$split[0]."\n";
+            echo "Unhandled or unrecognized instruction: ".$args[0]."\n";
             exit(RESULT_ERR_INVALID_OPCODE);
     }
 }
 
+$order = 1;
+while ($line = fgets(STDIN)) {
+    $line = strip_comment($line);
+    $line = trim($line);
+
+    if ($line == "")
+        continue; // ignore empty lines (the ones containing just comment)
+
+    if (!$has_header) {
+        if ($line == ".IPPcode22") {
+            $has_header = true;
+            continue;
+        } else {
+            echo "here line: ".$line."\n";
+            exit(RESULT_ERR_MISSING_HEADER);
+        }
+    }
+
+    //echo ($line)."\n";
+    $split = preg_split("/\s+/", $line);
+    $opcode = strtoupper(array_shift($split));
+
+    parse_instr($opcode, $split, $xml, $order++);
+}
+//TODO sanitize < > &
 $dom = new DOMDocument('1.0');
 $dom->preserveWhiteSpace = false;
 $dom->formatOutput = true;
