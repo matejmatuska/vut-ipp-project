@@ -2,6 +2,7 @@
 define("RESULT_OK", 0);
 define("RESULT_ERR_MISSING_ARG", 10);
 define("RESULT_ERR_INVALID_ARGS", 10);
+define("RESULT_ERR_MISSING_FILE", 41);
 
 const TEST_OUT_DIR = "test-out/";
 
@@ -11,7 +12,7 @@ $parser = "./parse.php";
 $interpret = "./interpret.py";
 $parseonly = false;
 $intonly = false;
-$jexampath = "/pub/courses/ipp/jexamxml/"; //TODO kocove lomitko je pripadne nutne doplnit
+$jexampath = "/pub/courses/ipp/jexamxml/";
 $noclean = false;
 
 foreach($argv as $arg) {
@@ -23,8 +24,6 @@ foreach($argv as $arg) {
             exit(RESULT_OK);
         case "--directory":
             $directory = $a[1];
-            //TODO           
-            $directory .= "/";
             break;
         case "--recursive":
             $recursive = true;
@@ -42,6 +41,7 @@ foreach($argv as $arg) {
             $intonly = true;
             break;
         case "--jexampath":
+            $jexampath = $a[1];
             break;
         case "--noclean":
             $noclean = true;
@@ -53,6 +53,41 @@ foreach($argv as $arg) {
             echo "Unrecognized argument: ".$arg."\n";
             exit(RESULT_ERR_INVALID_ARGS);
     }
+}
+
+if (substr($directory, -1) != "/")
+    $directory .= "/";
+
+if (!file_exists($directory)) {
+    echo "Specified --directory does not exist: $directory\n";
+    exit(RESULT_ERR_MISSING_FILE);
+}
+if (!is_dir($directory)) {
+    echo "Specified --directory is not a directory: $directory\n";
+    exit(RESULT_ERR_MISSING_FILE);
+}
+
+if ($parseonly && $intonly) {
+    echo "Both --int-only and --parse-only specified\n";
+    exit(RESULT_ERR_INVALID_ARGS);
+}
+if ($parseonly || !$intonly) {
+    if (file_exists($parser)) {
+        echo "Parser does not exist: $parser!\n";
+        exit(RESULT_ERR_MISSING_FILE);
+    }
+}
+
+if ($parseonly || !$intonly) {
+    if (file_exists($parser)) {
+        echo "Interpreter does not exist: $interpret!\n";
+        exit(RESULT_ERR_MISSING_FILE);
+    }
+}
+
+if (!file_exists($jexampath."jexamxml.jar")) {
+    echo "jexamxml does not exist: $jexampath"."jexamxml.jar!\n";
+    exit(RESULT_ERR_MISSING_FILE);
 }
 
 function exec_test($test, $outfile, $html) {
