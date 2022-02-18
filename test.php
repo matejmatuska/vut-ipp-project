@@ -72,14 +72,14 @@ if ($parseonly && $intonly) {
     exit(RESULT_ERR_INVALID_ARGS);
 }
 if ($parseonly || !$intonly) {
-    if (file_exists($parser)) {
+    if (!file_exists($parser)) {
         echo "Parser does not exist: $parser!\n";
         exit(RESULT_ERR_MISSING_FILE);
     }
 }
 
 if ($parseonly || !$intonly) {
-    if (file_exists($parser)) {
+    if (!file_exists($interpret)) {
         echo "Interpreter does not exist: $interpret!\n";
         exit(RESULT_ERR_MISSING_FILE);
     }
@@ -90,11 +90,16 @@ if (!file_exists($jexampath."jexamxml.jar")) {
     exit(RESULT_ERR_MISSING_FILE);
 }
 
+
+/*
+ * @param test path/filename path and filename of the test files, path is relative to the tests directory, filename is without extension
+ * @param outfile path/filename path and filename of the output files, path is relative to the tests directory, filename is without extension
+ */
 function exec_test($test, $outfile, $html) {
-    global $parser;
+    global $parser, $interpret, $parseonly;
 
     echo "Running test: $test\n";
-    if (!exec("php $parser < $test.src > $outfile", result_code: $retcode)) {
+    if (!exec("php $parser < $test.src > $outfile.xml", result_code: $retcode)) {
         //TODO failed to exec
     }
 
@@ -113,21 +118,47 @@ function exec_test($test, $outfile, $html) {
         echo "rc file does not exist\n";
     }
 
-    echo "Expected: ".$expect_rc." got: ".$retcode."\n";
-    if ($expect_rc == 0 && $retcode == 0) {
-        echo "Comparing outputs...\n";
-        // compare outputs
-        $expect_out = $test.".out";
-        $command = "java -jar jexamxml.jar $outfile $expect_out -M options";
-        if (!exec($command, result_code: $xml_rc)) {
-            echo "Failed executing jexamxml\n";
-        }
+    if ($parseonly) {
+        echo "Expected: ".$expect_rc." got: ".$retcode."\n";
 
-        generate_html($html, $test, true, $xml_rc == 0);
-    } else if ($expect_rc != $retcode) {
-        generate_html($html, $test, false, false);
+        if ($expect_rc == 0 && $retcode == 0) {
+            echo "Comparing outputs...\n";
+            // compare parser xml output
+            $expect_out = $test.".out";
+            // TODO respect $jexampath setting
+            $command = "java -jar jexamxml.jar $outfile.xml $expect_out -M options";
+            if (!exec($command, result_code: $xml_rc)) {
+                echo "Failed executing jexamxml\n";
+            }
+            generate_html($html, $test, true, $xml_rc == 0);
+        } else if ($expect_rc != $retcode) {
+            generate_html($html, $test, false, false);
+        } else {
+            generate_html($html, $test, true, true);
+        }
     } else {
-        generate_html($html, $test, true, true);
+        // TODO add input / source
+        $command = "python3 $interpret < $outfile.xml > $outfile.out";
+        if (exec($command, result_code: $int_rc) === false) {
+            echo "Failed executing interpreter\n";
+            // TODO should we exit?
+        }
+        echo "Expected: ".$expect_rc." got: ".$int_rc."\n";
+        if ($expect_rc == 0 && $int_rc == 0) {
+            // compare interpreter output
+            echo "Comparing diff outputs...\n";
+
+            $command = "diff $outfile.out $test.out";
+            if (!exec($command, result_code: $diff_rc)) {
+                echo "Failed executing diff, exit code: $diff_rc";
+                // TODO should we exit?
+            }
+            generate_html($html, $test, true, $diff_rc == 0);
+        } elseif ($expect_rc == $int_rc) {
+            generate_html($html, $test, true, true);
+        } else {
+            generate_html($html, $test, false, true);
+        }
     }
 }
 
@@ -157,7 +188,7 @@ function exec_tests_rec($dir, $path, $recursive, $html)
                 if (!file_exists($out_dir))
                     mkdir($out_dir, recursive: true);
 
-                $outfile = $out_dir.$filename.".xml";
+                $outfile = $out_dir.$filename; // out file without extension
                 exec_test($dir.$path.$filename, $outfile, $html);
             }
         } else {
