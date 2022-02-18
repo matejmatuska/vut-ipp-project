@@ -14,7 +14,7 @@ RESULT_ERR_MISSING_VALUE = 56
 RESULT_ERR_INVALID_OPERAND = 57
 RESULT_ERR_STRING_MANIPULATION = 58
 
-input = sys.stdin
+inputf = sys.stdin
 source = sys.stdin
 
 for arg in sys.argv:
@@ -25,7 +25,7 @@ for arg in sys.argv:
         # TODO print help
         exit(RESULT_OK);
     elif arg[0] == "--source":
-        input = arg[1]
+        inputf = arg[1]
     elif arg[0] == "--input":
         source = arg[1]
     else:
@@ -87,7 +87,7 @@ def xml_parse_arg(arg):
         value = ''
 
     elif type == 'nil':
-        value == None
+        value == 'nil'
 
     return TypedValue(type, value)
 
@@ -114,6 +114,25 @@ def exec_defvar(arg, framestack, tempframe):
 
     # TODO use typedvalue
     frame[name] = { 'type' : None, 'value' : None }
+
+
+def exec_exit(exit_code, framestack, tempframe):
+    if exit_code.type == 'var':
+        var = get_var(exit_code, framestack, tempframe)
+        exit_code.type = var['type']
+        exit_code.value = var['value']
+
+    if exit_code.value is None:
+        exit(RESULT_ERR_MISSING_VALUE)
+
+    if exit_code.type != 'int':
+        exit(RESULT_ERR_TYPE_COMPAT)
+
+    if exit_code.value < 0 or exit_code.value > 49:
+        exit(RESULT_ERR_INVALID_OPERAND)
+
+    print('EXITING with error code: ', exit_code.value)
+    exit(exit_code.value)
 
 
 def get_var(arg, framestack, tempframe):
@@ -153,16 +172,20 @@ def resolve_var(symb, framestack, tempframe, require_set = True):
 
 def are_eq(sym1, sym2, framestack, tempframe):
 
-    if sym1.value == 'var':
+    if sym1.type == 'var':
         sym1 = resolve_var(sym1, framestack, tempframe)
 
-    if sym2.value == 'var':
+    if sym2.type == 'var':
         sym2 = resolve_var(sym2, framestack, tempframe)
-    #print(f"Comparing [{type1}, {val1}] and [{type2}, {val2}]")
-    if sym1.type == sym2.type:
-        return sym1.type == sym2.type
+
+    #print(sym1.type, sym1.value)
+    #print(sym2.type, sym2.value)
+    # TODO handle ni;
+    if sym1.type == sym2.type or sym1.value == 'nil' or sym2.value == 'nil':
+        return sym1.value == sym2.value
     else:
         exit(RESULT_ERR_TYPE_COMPAT)
+
 
 def jump(labelmap, label):
     if label not in labelmap:
@@ -205,9 +228,12 @@ def exec_concat(instr, framestack, tempframe):
         sym2 = resolve_var(sym2, framestack, tempframe)
 
     if sym1.type == 'string' and sym2.type == 'string':
-        get_var(dest, framestack, tempframe)['value'] = sym1.value + sym2.value
+        var = get_var(dest, framestack, tempframe)
+        var['type'] = 'string'
+        var['value'] = sym1.value + sym2.value
     else:
         exit(RESULT_ERR_TYPE_COMPAT)
+
 
 def exec_artihmetic_impl(dest, sym1, sym2, operation):
     if sym1.type == 'int' and sym2.type == 'int':
@@ -216,6 +242,7 @@ def exec_artihmetic_impl(dest, sym1, sym2, operation):
         dest['value'] = result
     else:
         exit(RESULT_ERR_TYPE_COMPAT)
+
 
 def exec_artihmetic(instr, framestack, tempframe, operation):
     dest = instr.args[0]
@@ -231,12 +258,12 @@ def exec_artihmetic(instr, framestack, tempframe, operation):
 
     exec_artihmetic_impl(dest, sym1, sym2, operation)
 
+
 def exec_relational(instr, framestack, tempframe, operation):
     dest = instr.args[0]
     sym1 = instr.args[1]
     sym2 = instr.args[2]
 
-    dest = get_var(dest, framestack, tempframe)
     if sym1.type == 'var':
         sym1 = resolve_var(sym1, framestack, tempframe)
 
@@ -244,6 +271,7 @@ def exec_relational(instr, framestack, tempframe, operation):
         sym2 = resolve_var(sym2, framestack, tempframe)
 
     if sym1.type == sym2.type:
+        dest = get_var(dest, framestack, tempframe)
         dest['type'] = 'bool'
         dest['value'] = operation(sym1.value, sym2.value)
     else:
@@ -255,7 +283,6 @@ def exec_logical(instr, framestack, tempframe, operation):
     sym1 = instr.args[1]
     sym2 = instr.args[2]
 
-    dest = get_var(dest, framestack, tempframe)
     if sym1.type == 'var':
         sym1 = resolve_var(sym1, framestack, tempframe)
 
@@ -263,6 +290,7 @@ def exec_logical(instr, framestack, tempframe, operation):
         sym2 = resolve_var(sym2, framestack, tempframe)
 
     if sym1.type == 'bool' and sym2.type == 'bool':
+        dest = get_var(dest, framestack, tempframe)
         dest['type'] = 'bool'
         dest['value'] = operation(sym1.value, sym2.value)
     else:
@@ -272,6 +300,7 @@ def exec_logical(instr, framestack, tempframe, operation):
 instructions = list(root.iter("instruction"))
 instructions.sort(key=lambda instr: int(instr.attrib['order']))
 
+datastack = []
 callstack = []
 framestack = []
 # add global frame
@@ -280,6 +309,7 @@ framestack.append({})
 tempframe = None
 
 labelmap = {}
+
 pc = 0 # program counter
 while pc < len(instructions):
     instr = instructions[pc]
@@ -288,10 +318,11 @@ while pc < len(instructions):
 
     if instr.attrib['opcode'] == 'LABEL':
         label = instr.find('arg1').text
+        if label in labelmap:
+            exit(RESULT_ERR_SEMANTICS)
         labelmap[label] = pc
 
-print(labelmap)
-
+print("Label map:", labelmap)
 
 pc = 0
 while pc < len(instructions):
@@ -330,7 +361,8 @@ while pc < len(instructions):
 
     elif "CALL" == instr.opcode:
         callstack.append(pc)
-        pc = labelmap[instr.args[0].value]
+        label = instr.args[0].value
+        pc = jump(labelmap, label)
 
     elif "RETURN" == instr.opcode:
         if not callstack:
@@ -340,23 +372,7 @@ while pc < len(instructions):
 
     elif "EXIT" == instr.opcode:
         exit_code = instr.args[0]
-        
-        if exit_code.type == 'var':
-            var = get_var(exit_code, framestack, tempframe)
-            exit_code.type = var['type']
-            exit_code.value = var['value']
-
-        if exit_code.value is None:
-            exit(RESULT_ERR_MISSING_VALUE)
-
-        if exit_code.type != 'int':
-            exit(RESULT_ERR_TYPE_COMPAT)
-
-        if exit_code.value < 0 or exit_code.value > 49:
-            exit(RESULT_ERR_INVALID_OPERAND)
-
-        print('EXITING with error code: ', exit_code.value)
-        exit(exit_code.value)
+        exec_exit(exit_code, framestack, tempframe)
 
     elif "CREATEFRAME" == instr.opcode:
         tempframe = {}
@@ -391,8 +407,36 @@ while pc < len(instructions):
         sym1 = instr.args[1]
         sym2 = instr.args[2]
 
+        # TODO should we check if label exists even when not jumping there ??
+
         if not are_eq(sym1, sym2, framestack, tempframe):
             pc = jump(labelmap, label)
+
+    elif "READ" == instr.opcode:
+        dest = instr.args[0]
+        type = instr.args[1]
+
+        dest = get_var(dest, framestack, tempframe)
+        print(type)
+
+        try:
+            i = input()
+        except EOFError:
+            dest['type'] = 'nil'
+            dest['value'] = 'nil'
+            continue
+
+        if type.type == 'int':
+            dest['type'] = 'int'
+            dest['value'] = int(i)
+        elif type.type == 'string':
+            dest['type'] = 'string'
+            dest['value'] = i
+        elif type.type == 'bool':
+            dest['type'] = 'bool'
+            dest['value'] = i.casefold() == 'true'
+        else:
+            pass
 
     elif "WRITE" == instr.opcode:
         write(instr)
@@ -420,10 +464,53 @@ while pc < len(instructions):
             # TODO nejaky error
             pass
 
+    elif "GETCHAR" == instr.opcode:
+        dest = instr.args[0]
+        sym1 = instr.args[1]
+        sym2 = instr.args[2]
+
+        if sym1.type == 'var':
+            sym1 = resolve_var(sym1, framestack, tempframe)
+
+        if sym2.type == 'var':
+            sym2 = resolve_var(sym2, framestack, tempframe)
+
+        if sym1.type == 'string' and sym2.type == 'int':
+            if sym2.value >= len(sym1.value) or sym2.value < 0:
+                exit(RESULT_ERR_STRING_MANIPULATION)
+
+            dest = get_var(dest, framestack, tempframe)
+            dest['type'] = 'string'
+            dest['value'] = sym1.value[sym2.value]
+        else:
+            exit(RESULT_ERR_TYPE_COMPAT)
+    elif "SETCHAR" == instr.opcode:
+        dest = instr.args[0]
+        sym1 = instr.args[1]
+        sym2 = instr.args[2]
+
+        if sym1.type == 'var':
+            sym1 = resolve_var(sym1, framestack, tempframe)
+
+        if sym2.type == 'var':
+            sym2 = resolve_var(sym2, framestack, tempframe)
+
+        dest = get_var(dest, framestack, tempframe)
+        if dest['type'] == 'string' and sym1.type == 'int' and sym2.type == 'string':
+
+            if sym1.value >= len(dest['value']) or sym1.value < 0 or len(sym2.value) == 0:
+                exit(RESULT_ERR_STRING_MANIPULATION)
+
+            s = dest['value'] 
+            string = s[:sym1.value] + sym2.value[0] + s[sym1.value + 1:]
+        else:
+            exit(RESULT_ERR_TYPE_COMPAT)
+
     elif "TYPE" == instr.opcode:
         dest = instr.args[0]
         symb = instr.args[1]
 
+        print(symb.type, symb.value)
         if symb.type == 'var':
             symb = resolve_var(symb, framestack, tempframe, require_set=False)
             if symb.value is None:
@@ -433,6 +520,25 @@ while pc < len(instructions):
         dest = get_var(dest, framestack, tempframe)
         dest['type'] = 'string'
         dest['value'] = symb.type
+        print(dest)
+
+    elif "PUSHS" == instr.opcode:
+        symb = instr.args[0]
+
+        if symb.type == 'var':
+            symb = resolve_var(symb, framestack, tempframe)
+
+        datastack.append(symb)
+
+    elif "POPS" == instr.opcode:
+        if not datastack:
+            exit(RESULT_ERR_MISSING_VALUE)
+
+        dest = instr.args[0]
+        dest = get_var(dest, framestack, tempframe)
+        item = datastack.pop()
+        dest['type'] = item.type
+        dest['value'] = item.value
 
     elif "ADD" == instr.opcode:
         exec_artihmetic(instr, framestack, tempframe, lambda a, b: a + b)
@@ -445,7 +551,6 @@ while pc < len(instructions):
         sym1 = instr.args[1]
         sym2 = instr.args[2]
 
-        dest = get_var(dest, framestack, tempframe)
         if sym1.type == 'var':
             sym1 = resolve_var(sym1, framestack, tempframe)
 
@@ -455,6 +560,7 @@ while pc < len(instructions):
         if sym2.value == 0:
             exit(RESULT_ERR_INVALID_OPERAND)
 
+        dest = get_var(dest, framestack, tempframe)
         exec_artihmetic_impl(dest, sym1, sym2, lambda a, b: a // b)
 
     elif "LT" == instr.opcode:
@@ -498,7 +604,27 @@ while pc < len(instructions):
         else:
             exit(RESULT_ERR_TYPE_COMPAT)
     elif "STRI2INT" == instr.opcode:
-        pass
+        dest = instr.args[0]
+        sym1 = instr.args[1]
+        sym2 = instr.args[2]
+
+        if sym1.type == 'var':
+            sym1 = resolve_var(sym1, framestack, tempframe)
+
+        if sym2.type == 'var':
+            sym2 = resolve_var(sym2, framestack, tempframe)
+
+        if sym1.type == 'string' and sym2.type == 'int':
+            dest = get_var(dest, framestack, tempframe)
+
+            if sym2.value >= len(sym1.value) or sym2.value < 0:
+                exit(RESULT_ERR_STRING_MANIPULATION)
+
+            char = sym1.value[sym2.value]
+            dest['value'] = ord(char)
+            dest['type'] = 'int'
+        else:
+            exit(RESULT_ERR_TYPE_COMPAT)
     else:
         sys.stderr.write("Unrecognized instruction: " + instr.opcode + "\n")
         exit(667)
