@@ -474,12 +474,31 @@ while pc < len(instructions):
         if symb.type == 'var':
             symb = resolve_var(symb, framestack, tempframe)
 
-        dest = get_var(dest, framestack, tempframe)
         if symb.type == 'bool':
+            dest = get_var(dest, framestack, tempframe)
             dest['type'] = 'bool'
             dest['value'] = not symb.value
         else:
             exit(RESULT_ERR_TYPE_COMPAT)
+
+    elif "INT2CHAR" == instr.opcode:
+        dest = instr.args[0]
+        symb = instr.args[1]
+
+        if symb.type == 'var':
+            symb = resolve_var(symb, framestack, tempframe)
+
+        if symb.type == 'int':
+            dest = get_var(dest, framestack, tempframe)
+            dest['type'] = 'string'
+            try:
+                dest['value'] = chr(symb.value)
+            except ValueError:
+                exit(RESULT_ERR_STRING_MANIPULATION)
+        else:
+            exit(RESULT_ERR_TYPE_COMPAT)
+    elif "STRI2INT" == instr.opcode:
+        pass
     else:
         sys.stderr.write("Unrecognized instruction: " + instr.opcode + "\n")
         exit(667)
