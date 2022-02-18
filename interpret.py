@@ -19,7 +19,7 @@ source = sys.stdin
 
 for arg in sys.argv:
     arg = arg.split("=", 2)
-    if arg[0] == "interpret.py":
+    if arg[0] == "./interpret.py":
         pass # no-op
     elif arg[0] == "--help":
         # TODO print help
@@ -29,7 +29,7 @@ for arg in sys.argv:
     elif arg[0] == "--input":
         source = arg[1]
     else:
-        sys.stderr.write("Unrecognized argument: " + arg[0]);
+        sys.stderr.write("Unrecognized argument: " + arg[0] + "\n");
 
 tree = ET.parse(source)
 root = tree.getroot()
@@ -85,7 +85,6 @@ def xml_parse_arg(arg):
 
     elif type == 'nil':
         value == None
-        pass
 
     return TypedValue(type, value)
 
@@ -134,6 +133,9 @@ def get_var(arg, framestack, tempframe):
     else:
         exit(456)
 
+    if name not in frame:
+        exit(RESULT_ERR_UNDEIFNED_VAR)
+
     return frame[name]
 
 
@@ -146,13 +148,17 @@ def are_eq(sym1, sym2, framestack, tempframe):
 
     if type1 == 'var':
         var = get_var(sym1, framestack, tempframe)
+        print(var)
         type1 = var['type']
         val1 = var['value']
+
     if type2 == 'var':
         var = get_var(sym2, framestack, tempframe)
+        print(var)
         type2 = var['type']
         val2 = var['value']
 
+    print(f"Comparing [{type1}, {val1}] and [{type2}, {val2}]")
     if type1 == type2:
         if val1 == val2:
             return True
@@ -180,6 +186,7 @@ def write(instr):
             print(s)
         else:
             print(val, end='')
+            #print(val)
 
     elif arg.type == "bool":
         if arg.value == True:
@@ -221,8 +228,8 @@ callstack = []
 framestack = []
 # add global frame
 framestack.append({})
-# temporary frame
-tempframe = {}
+# temporary frame (TF)
+tempframe = None
 
 labelmap = {}
 pc = 0 # program counter
@@ -264,6 +271,11 @@ while pc < len(instructions):
         if var is None:
             exit(RESULT_ERR_UNDEIFNED_VAR)
 
+        if src.type == 'var':
+            var2 = get_var(src, framestack, tempframe)
+            src.type = var2['type']
+            src.value = var2['value']
+
         var['type'] = src.type
         var['value'] = src.value
 
@@ -281,12 +293,24 @@ while pc < len(instructions):
 
         pc = callstack.pop()
     elif "EXIT" == instr.opcode:
-        exit_code = instr.args[0].value
-        if (exit_code < 0 or exit_code > 49):
+        exit_code = instr.args[0]
+        
+        if exit_code.type == 'var':
+            var = get_var(exit_code, framestack, tempframe)
+            exit_code.type = var['type']
+            exit_code.value = var['value']
+
+        if exit_code.value is None:
+            exit(RESULT_ERR_MISSING_VALUE)
+
+        if exit_code.type != 'int':
+            exit(RESULT_ERR_TYPE_COMPAT)
+
+        if exit_code.value < 0 or exit_code.value > 49:
             exit(RESULT_ERR_INVALID_OPERAND)
 
-        print('EXITING with error code: ', exit_code)
-        exit(exit_code)
+        print('EXITING with error code: ', exit_code.value)
+        exit(exit_code.value)
 
     elif "CREATEFRAME" == instr.opcode:
         tempframe = {}
@@ -360,15 +384,19 @@ while pc < len(instructions):
             val1 = sym1.value
             type1 = sym1.type
 
-        if sym1.type == 'var':
+        if sym2.type == 'var':
             type2 = get_var(sym2, framestack, tempframe)['type']
             val2 = get_var(sym2, framestack, tempframe)['value']
         else:
             type2 = sym2.type
             val2 = sym2.value
 
-        if type1 != 'int' or type2 != 'int':
+        if type1 == 'int' and type2 == 'int':
+            dest['type'] = 'int'
             dest['value'] = val1 + val2
+        else:
+            # TODO which err
+            exit(9666)
 
     else:
         sys.stderr.write("Unrecognized instruction: " + instr.opcode + "\n")
