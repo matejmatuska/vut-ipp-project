@@ -71,6 +71,10 @@ if ($parseonly && $intonly) {
     echo "Both --int-only and --parse-only specified\n";
     exit(RESULT_ERR_INVALID_ARGS);
 }
+
+$test_parser = !$intonly;
+$test_interpret = !$parseonly;
+
 if ($parseonly || !$intonly) {
     if (!file_exists($parser)) {
         echo "Parser does not exist: $parser!\n";
@@ -96,7 +100,7 @@ if (!file_exists($jexampath."jexamxml.jar")) {
  * @param outfile path/filename path and filename of the output files, path is relative to the tests directory, filename is without extension
  */
 function exec_test($test, $outfile, $html) {
-    global $parser, $interpret, $parseonly;
+    global $parser, $interpret, $test_parser, $test_interpret;
 
     echo "Running test: $test\n";
     if (!exec("php $parser < $test.src > $outfile.xml", result_code: $retcode)) {
@@ -118,7 +122,7 @@ function exec_test($test, $outfile, $html) {
         echo "rc file does not exist\n";
     }
 
-    if ($parseonly) {
+    if ($test_parser && !$test_interpret) {
         echo "Expected: ".$expect_rc." got: ".$retcode."\n";
 
         if ($expect_rc == 0 && $retcode == 0) {
@@ -136,9 +140,15 @@ function exec_test($test, $outfile, $html) {
         } else {
             generate_html($html, $test, true, true);
         }
-    } else {
+    }
+    if ($test_interpret) {
         // TODO add input / source
-        $command = "python3 $interpret < $outfile.xml > $outfile.out";
+        if ($test_parser) 
+            $src_file = $outfile.".xml";
+        else
+            $src_file = $test.".src";
+
+        $command = "python3 $interpret < $src_file > $outfile.out";
         if (exec($command, result_code: $int_rc) === false) {
             echo "Failed executing interpreter\n";
             // TODO should we exit?
