@@ -45,21 +45,19 @@ for arg in sys.argv:
         eprint("Unrecognized argument:",  arg[0]);
         exit(RESULT_ERR_ARGUMENTS)
 
-tree = ET.parse(sourcef)
-root = tree.getroot()
-if root.tag != "program":
-    exit(RESULT_ERR_XML_FORMAT)
-
 class TypedValue:
 
     def __init__(self, type, value):
         self.value = value
         self.type = type
 
+    def __str__(self):
+        return f'TypedValue[type={self.type}, value={self.value}]'
+
 
 class Instruction:
 
-    def __init__(self, opcode, args): # order ma asi moc netrapi
+    def __init__(self, opcode, args):
         self.opcode = opcode
         self.args = args
 
@@ -135,8 +133,7 @@ def exec_defvar(arg, framestack, tempframe):
         eprint('DEFVAR variable is already defined: ', arg.value)
         exit(RESULT_ERR_SEMANTICS)
 
-    # TODO use typedvalue
-    frame[name] = { 'type' : None, 'value' : None }
+    frame[name] = TypedValue(None, None)
 
 
 def exec_exit(exit_code):
@@ -181,10 +178,9 @@ def get_var(arg, framestack, tempframe):
 # resolves symbol to variable
 def resolve_var(symb, framestack, tempframe, require_set = True):
     var = get_var(symb, framestack, tempframe)
-    ret =  TypedValue(var['type'], var['value'])
-    if require_set and ret.value is None:
+    if require_set and var.value is None:
         exit(RESULT_ERR_MISSING_VALUE)
-    return ret
+    return var
 
 
 def are_eq(sym1, sym2, framestack, tempframe):
@@ -209,20 +205,20 @@ def exec_read(dest, type):
     try:
         i = input()
     except EOFError:
-        dest['type'] = 'nil'
-        dest['value'] = 'nil'
+        dest.type = 'nil'
+        dest.value = 'nil'
         return
 
     if type.type == 'int':
-        dest['type'] = 'int'
+        dest.type = 'int'
         # TODO catch exception when converting failed
-        dest['value'] = int(i)
+        dest.value = int(i)
     elif type.type == 'string':
-        dest['type'] = 'string'
-        dest['value'] = i
+        dest.type = 'string'
+        dest.value = i
     elif type.type == 'bool':
-        dest['type'] = 'bool'
-        dest['value'] = i.casefold() == 'true'
+        dest.type = 'bool'
+        dest.value = i.casefold() == 'true'
     else:
         # TODO
         pass
@@ -249,8 +245,8 @@ def exec_write(arg):
 
 def exec_concat(dest, sym1, sym2):
     if sym1.type == 'string' and sym2.type == 'string':
-        dest['type'] = 'string'
-        dest['value'] = sym1.value + sym2.value
+        dest.type = 'string'
+        dest.value = sym1.value + sym2.value
     else:
         exit(RESULT_ERR_TYPE_COMPAT)
 
@@ -262,17 +258,17 @@ def exec_stri2int(dest, sym1, sym2):
             exit(RESULT_ERR_STRING_MANIPULATION)
 
         char = sym1.value[sym2.value]
-        dest['value'] = ord(char)
-        dest['type'] = 'int'
+        dest.value = ord(char)
+        dest.type = 'int'
     else:
         exit(RESULT_ERR_TYPE_COMPAT)
 
 
 def exec_int2char(dest, symb):
     if symb.type == 'int':
-        dest['type'] = 'string'
+        dest.type = 'string'
         try:
-            dest['value'] = chr(symb.value)
+            dest.value = chr(symb.value)
         except ValueError:
             exit(RESULT_ERR_STRING_MANIPULATION)
     else:
@@ -284,33 +280,33 @@ def exec_getchar(dest, sym1, sym2):
         if sym2.value >= len(sym1.value) or sym2.value < 0:
             exit(RESULT_ERR_STRING_MANIPULATION)
 
-        dest['type'] = 'string'
-        dest['value'] = sym1.value[sym2.value]
+        dest.type = 'string'
+        dest.value = sym1.value[sym2.value]
     else:
         exit(RESULT_ERR_TYPE_COMPAT)
 
 
 def exec_setchar(dest, sym1, sym2):
-    if (dest['type'] == 'string' and sym1.type == 'int'
+    if (dest.type == 'string' and sym1.type == 'int'
             and sym2.type == 'string'):
 
-        if (sym1.value >= len(dest['value']) or sym1.value < 0
+        if (sym1.value >= len(dest.value) or sym1.value < 0
                 or len(sym2.value) == 0):
             exit(RESULT_ERR_STRING_MANIPULATION)
 
-        s = dest['value'] 
+        s = dest.value 
         string = s[:sym1.value] + sym2.value[0] + s[sym1.value + 1:]
         # type is already string
-        dest['value'] = string
+        dest.value = string
     else:
         exit(RESULT_ERR_TYPE_COMPAT)
 
 
 def exec_artihmetic_impl(dest, sym1, sym2, operation):
     if sym1.type == 'int' and sym2.type == 'int':
-        dest['type'] = 'int'
+        dest.type = 'int'
         result = operation(sym1.value, sym2.value)
-        dest['value'] = result
+        dest.value = result
     else:
         exit(RESULT_ERR_TYPE_COMPAT)
 
@@ -343,8 +339,8 @@ def exec_relational(instr, framestack, tempframe, operation):
 
     if sym1.type == sym2.type:
         dest = get_var(dest, framestack, tempframe)
-        dest['type'] = 'bool'
-        dest['value'] = operation(sym1.value, sym2.value)
+        dest.type = 'bool'
+        dest.value = operation(sym1.value, sym2.value)
     else:
         exit(RESULT_ERR_TYPE_COMPAT)
 
@@ -362,11 +358,15 @@ def exec_logical(instr, framestack, tempframe, operation):
 
     if sym1.type == 'bool' and sym2.type == 'bool':
         dest = get_var(dest, framestack, tempframe)
-        dest['type'] = 'bool'
-        dest['value'] = operation(sym1.value, sym2.value)
+        dest.type = 'bool'
+        dest.value = operation(sym1.value, sym2.value)
     else:
         exit(RESULT_ERR_TYPE_COMPAT)
 
+tree = ET.parse(sourcef)
+root = tree.getroot()
+if root.tag != "program":
+    exit(RESULT_ERR_XML_FORMAT)
 
 instructions = list(root.iter("instruction"))
 instructions.sort(key=lambda instr: int(instr.attrib['order']))
@@ -420,8 +420,8 @@ while pc < len(instructions):
         if src.type == 'var':
             src = resolve_var(src, framestack, tempframe)
 
-        dest['type'] = src.type
-        dest['value'] = src.value
+        dest.type = src.type
+        dest.value = src.value
 
     elif "LABEL" == instr.opcode:
         pass
@@ -521,8 +521,8 @@ while pc < len(instructions):
             exit(RESULT_ERR_TYPE_COMPAT)
 
         dest = get_var(dest, framestack, tempframe)
-        dest['type'] = 'int'
-        dest['value'] = len(symb.value)
+        dest.type = 'int'
+        dest.value = len(symb.value)
 
     elif "GETCHAR" == instr.opcode:
         dest = instr.args[0]
@@ -563,8 +563,8 @@ while pc < len(instructions):
                 symb.type = ''
 
         dest = get_var(dest, framestack, tempframe)
-        dest['type'] = 'string'
-        dest['value'] = symb.type
+        dest.type = 'string'
+        dest.value = symb.type
 
     elif "PUSHS" == instr.opcode:
         symb = instr.args[0]
@@ -581,8 +581,8 @@ while pc < len(instructions):
         dest = instr.args[0]
         dest = get_var(dest, framestack, tempframe)
         item = datastack.pop()
-        dest['type'] = item.type
-        dest['value'] = item.value
+        dest.type = item.type
+        dest.value = item.value
 
     elif "ADD" == instr.opcode:
         exec_artihmetic(instr, framestack, tempframe, lambda a, b: a + b)
@@ -626,8 +626,8 @@ while pc < len(instructions):
 
         if symb.type == 'bool':
             dest = get_var(dest, framestack, tempframe)
-            dest['type'] = 'bool'
-            dest['value'] = not symb.value
+            dest.type = 'bool'
+            dest.value = not symb.value
         else:
             exit(RESULT_ERR_TYPE_COMPAT)
 
@@ -656,8 +656,11 @@ while pc < len(instructions):
         exec_stri2int(dest, sym1, sym2)
 
     elif "DPRINT" == instr.opcode:
-        # TODO maybe DPRINT
-        pass
+        symb = instr.args[0]
+        if symb.type == 'var':
+            symb = resolve_var(symb, framestack, tempframe)
+        eprint(symb.value)
+
     elif "BREAK" == instr.opcode:
         # TODO maybe BREAK
         pass
