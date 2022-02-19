@@ -1,4 +1,3 @@
-from os import write
 import sys;
 import xml.etree.ElementTree as ET
 
@@ -20,6 +19,10 @@ RESULT_ERR_STRING_MANIPULATION = 58
 
 RESULT_ERR_INTERNAL = 99
 
+def eprint(*objects, sep=' ', end='\n', flush=False):
+    print(*objects, sep=sep, end=end, file=sys.stderr, flush=flush)
+
+
 inputf = sys.stdin
 sourcef = sys.stdin
 
@@ -39,7 +42,7 @@ for arg in sys.argv:
             exit(RESULT_ERR_ARGUMENTS)
         inputf = arg[1]
     else:
-        sys.stderr.write("Unrecognized argument: " + arg[0] + "\n");
+        eprint("Unrecognized argument:",  arg[0]);
         exit(RESULT_ERR_ARGUMENTS)
 
 tree = ET.parse(sourcef)
@@ -63,6 +66,11 @@ class Instruction:
 
 def xml_parse_instruction(xmlElem):
     opcode = xmlElem.attrib['opcode']
+    order = int(xmlElem.attrib['order'])
+    if order < 0:
+        eprint('Attribute "order" must be a positive number, was:', order)
+        exit(RESULT_ERR_XML_FORMAT)
+
     args = []
     arg = xmlElem.find('arg1')
     if arg is not None:
@@ -85,7 +93,6 @@ def xml_parse_arg(arg):
 
     if type == 'int':
         value = int(value)
-
     elif type == 'bool':
         if value == "true":
             value = True;
@@ -93,14 +100,19 @@ def xml_parse_arg(arg):
             value = False;
         else:
             exit(666)
-
     elif type == 'string' and value is None:
         value = ''
-
     elif type == 'nil':
         value == 'nil'
 
     return TypedValue(type, value)
+
+
+def jump(labelmap, label):
+    if label not in labelmap:
+        exit(RESULT_ERR_SEMANTICS)
+
+    return labelmap[label]
 
 
 def exec_defvar(arg, framestack, tempframe):
@@ -120,19 +132,14 @@ def exec_defvar(arg, framestack, tempframe):
         exit(456)
 
     if name in frame:
-        print('DEFVAR variable is already defined: ', arg.value)
+        eprint('DEFVAR variable is already defined: ', arg.value)
         exit(RESULT_ERR_SEMANTICS)
 
     # TODO use typedvalue
     frame[name] = { 'type' : None, 'value' : None }
 
 
-def exec_exit(exit_code, framestack, tempframe):
-    if exit_code.type == 'var':
-        var = get_var(exit_code, framestack, tempframe)
-        exit_code.type = var['type']
-        exit_code.value = var['value']
-
+def exec_exit(exit_code):
     if exit_code.value is None:
         exit(RESULT_ERR_MISSING_VALUE)
 
@@ -142,7 +149,6 @@ def exec_exit(exit_code, framestack, tempframe):
     if exit_code.value < 0 or exit_code.value > 49:
         exit(RESULT_ERR_INVALID_OPERAND)
 
-    print('EXITING with error code: ', exit_code.value)
     exit(exit_code.value)
 
 
@@ -198,20 +204,33 @@ def are_eq(sym1, sym2, framestack, tempframe):
         exit(RESULT_ERR_TYPE_COMPAT)
 
 
-def jump(labelmap, label):
-    if label not in labelmap:
-        exit(RESULT_ERR_SEMANTICS)
+def exec_read(dest, type):
+    # TODO allow reading from file
+    try:
+        i = input()
+    except EOFError:
+        dest['type'] = 'nil'
+        dest['value'] = 'nil'
+        return
 
-    return labelmap[label]
+    if type.type == 'int':
+        dest['type'] = 'int'
+        # TODO catch exception when converting failed
+        dest['value'] = int(i)
+    elif type.type == 'string':
+        dest['type'] = 'string'
+        dest['value'] = i
+    elif type.type == 'bool':
+        dest['type'] = 'bool'
+        dest['value'] = i.casefold() == 'true'
+    else:
+        # TODO
+        pass
 
 
-def write(instr):
+def exec_write(arg):
     # TODO tie debilne unicode charactery
-    arg = instr.args[0]
-    if arg.type == 'var':
-        arg = resolve_var(arg, framestack, tempframe)
-
-    elif arg.type == "bool":
+    if arg.type == "bool":
         if arg.value == True:
             print("true", end='')
         else:
@@ -219,6 +238,7 @@ def write(instr):
 
     elif arg.type == "nil":
         print('', end='')
+
     elif arg.type == "string":
         s = arg.value.encode().decode('unicode-escape')
         #print(s, end='')
@@ -227,21 +247,61 @@ def write(instr):
         print(arg.value, end='')
 
 
-def exec_concat(instr, framestack, tempframe):
-    dest = instr.args[0]
-    sym1 = instr.args[1]
-    sym2 = instr.args[2]
-
-    if sym1.type == 'var':
-        sym1 = resolve_var(sym1, framestack, tempframe)
-
-    if sym2.type == 'var':
-        sym2 = resolve_var(sym2, framestack, tempframe)
-
+def exec_concat(dest, sym1, sym2):
     if sym1.type == 'string' and sym2.type == 'string':
-        var = get_var(dest, framestack, tempframe)
-        var['type'] = 'string'
-        var['value'] = sym1.value + sym2.value
+        dest['type'] = 'string'
+        dest['value'] = sym1.value + sym2.value
+    else:
+        exit(RESULT_ERR_TYPE_COMPAT)
+
+
+def exec_stri2int(dest, sym1, sym2):
+    if sym1.type == 'string' and sym2.type == 'int':
+
+        if sym2.value >= len(sym1.value) or sym2.value < 0:
+            exit(RESULT_ERR_STRING_MANIPULATION)
+
+        char = sym1.value[sym2.value]
+        dest['value'] = ord(char)
+        dest['type'] = 'int'
+    else:
+        exit(RESULT_ERR_TYPE_COMPAT)
+
+
+def exec_int2char(dest, symb):
+    if symb.type == 'int':
+        dest['type'] = 'string'
+        try:
+            dest['value'] = chr(symb.value)
+        except ValueError:
+            exit(RESULT_ERR_STRING_MANIPULATION)
+    else:
+        exit(RESULT_ERR_TYPE_COMPAT)
+
+
+def exec_getchar(dest, sym1, sym2):
+    if sym1.type == 'string' and sym2.type == 'int':
+        if sym2.value >= len(sym1.value) or sym2.value < 0:
+            exit(RESULT_ERR_STRING_MANIPULATION)
+
+        dest['type'] = 'string'
+        dest['value'] = sym1.value[sym2.value]
+    else:
+        exit(RESULT_ERR_TYPE_COMPAT)
+
+
+def exec_setchar(dest, sym1, sym2):
+    if (dest['type'] == 'string' and sym1.type == 'int'
+            and sym2.type == 'string'):
+
+        if (sym1.value >= len(dest['value']) or sym1.value < 0
+                or len(sym2.value) == 0):
+            exit(RESULT_ERR_STRING_MANIPULATION)
+
+        s = dest['value'] 
+        string = s[:sym1.value] + sym2.value[0] + s[sym1.value + 1:]
+        # type is already string
+        dest['value'] = string
     else:
         exit(RESULT_ERR_TYPE_COMPAT)
 
@@ -339,7 +399,7 @@ while pc < len(instructions):
 pc = 0
 while pc < len(instructions):
     instr: Instruction = instructions[pc]
-    #print(pc, 'instruction: ' + instr.opcode)
+    #eprint(pc, 'instruction: ' + instr.opcode)
     pc = pc + 1
 
     if "DEFVAR" == instr.opcode:
@@ -353,15 +413,15 @@ while pc < len(instructions):
         if (src.value == None):
             src.value = ''
 
-        var = get_var(dest, framestack, tempframe)
-        if var is None:
+        dest = get_var(dest, framestack, tempframe)
+        if dest is None:
             exit(RESULT_ERR_UNDEFINED_VAR)
 
         if src.type == 'var':
             src = resolve_var(src, framestack, tempframe)
 
-        var['type'] = src.type
-        var['value'] = src.value
+        dest['type'] = src.type
+        dest['value'] = src.value
 
     elif "LABEL" == instr.opcode:
         pass
@@ -373,13 +433,16 @@ while pc < len(instructions):
 
     elif "RETURN" == instr.opcode:
         if not callstack:
-            print('RETURN: Callstack is empty')
+            eprint('RETURN: Callstack is empty')
             exit(RESULT_ERR_MISSING_VALUE)
         pc = callstack.pop()
 
     elif "EXIT" == instr.opcode:
         exit_code = instr.args[0]
-        exec_exit(exit_code, framestack, tempframe)
+        if exit_code.type == 'var':
+            exit_code = resolve_var(exit_code, framestack, tempframe)
+
+        exec_exit(exit_code)
 
     elif "CREATEFRAME" == instr.opcode:
         tempframe = {}
@@ -390,9 +453,10 @@ while pc < len(instructions):
 
         framestack.append(tempframe)
         tempframe = None
+
     elif "POPFRAME" == instr.opcode:
         if len(framestack) == 1:
-            print("POPFRAME: No available LF")
+            eprint("POPFRAME: No available LF")
             exit(RESULT_ERR_FRAME_NONEXISTENT)
 
         tempframe = framestack.pop()
@@ -420,38 +484,31 @@ while pc < len(instructions):
             pc = jump(labelmap, label)
 
     elif "READ" == instr.opcode:
-        # TODO allow reading from file
         dest = instr.args[0]
         type = instr.args[1]
 
         dest = get_var(dest, framestack, tempframe)
-        print(type)
-
-        try:
-            i = input()
-        except EOFError:
-            dest['type'] = 'nil'
-            dest['value'] = 'nil'
-            continue
-
-        if type.type == 'int':
-            dest['type'] = 'int'
-            # TODO catch exception when converting failed
-            dest['value'] = int(i)
-        elif type.type == 'string':
-            dest['type'] = 'string'
-            dest['value'] = i
-        elif type.type == 'bool':
-            dest['type'] = 'bool'
-            dest['value'] = i.casefold() == 'true'
-        else:
-            pass
+        exec_read(dest, type)
 
     elif "WRITE" == instr.opcode:
-        write(instr)
+        arg = instr.args[0]
+        if arg.type == 'var':
+            arg = resolve_var(arg, framestack, tempframe)
+        exec_write(arg)
 
     elif "CONCAT" == instr.opcode:
-        exec_concat(instr, framestack, tempframe)
+        dest = instr.args[0]
+        sym1 = instr.args[1]
+        sym2 = instr.args[2]
+
+        if sym1.type == 'var':
+            sym1 = resolve_var(sym1, framestack, tempframe)
+
+        if sym2.type == 'var':
+            sym2 = resolve_var(sym2, framestack, tempframe)
+
+        dest = get_var(dest, framestack, tempframe)
+        exec_concat(dest, sym1, sym2)
 
     elif "STRLEN" == instr.opcode:
         dest = instr.args[0]
@@ -463,9 +520,9 @@ while pc < len(instructions):
         if symb.type != 'string':
             exit(RESULT_ERR_TYPE_COMPAT)
 
-        var = get_var(dest, framestack, tempframe)
-        var['type'] = 'int'
-        var['value'] = len(symb.value)
+        dest = get_var(dest, framestack, tempframe)
+        dest['type'] = 'int'
+        dest['value'] = len(symb.value)
 
     elif "GETCHAR" == instr.opcode:
         dest = instr.args[0]
@@ -478,15 +535,9 @@ while pc < len(instructions):
         if sym2.type == 'var':
             sym2 = resolve_var(sym2, framestack, tempframe)
 
-        if sym1.type == 'string' and sym2.type == 'int':
-            if sym2.value >= len(sym1.value) or sym2.value < 0:
-                exit(RESULT_ERR_STRING_MANIPULATION)
+        dest = get_var(dest, framestack, tempframe)
+        exec_getchar(dest, sym1, sym2)
 
-            dest = get_var(dest, framestack, tempframe)
-            dest['type'] = 'string'
-            dest['value'] = sym1.value[sym2.value]
-        else:
-            exit(RESULT_ERR_TYPE_COMPAT)
     elif "SETCHAR" == instr.opcode:
         dest = instr.args[0]
         sym1 = instr.args[1]
@@ -499,21 +550,12 @@ while pc < len(instructions):
             sym2 = resolve_var(sym2, framestack, tempframe)
 
         dest = get_var(dest, framestack, tempframe)
-        if dest['type'] == 'string' and sym1.type == 'int' and sym2.type == 'string':
-
-            if sym1.value >= len(dest['value']) or sym1.value < 0 or len(sym2.value) == 0:
-                exit(RESULT_ERR_STRING_MANIPULATION)
-
-            s = dest['value'] 
-            string = s[:sym1.value] + sym2.value[0] + s[sym1.value + 1:]
-        else:
-            exit(RESULT_ERR_TYPE_COMPAT)
+        exec_setchar(dest, sym1, sym2)
 
     elif "TYPE" == instr.opcode:
         dest = instr.args[0]
         symb = instr.args[1]
 
-        print(symb.type, symb.value)
         if symb.type == 'var':
             symb = resolve_var(symb, framestack, tempframe, require_set=False)
             if symb.value is None:
@@ -523,7 +565,6 @@ while pc < len(instructions):
         dest = get_var(dest, framestack, tempframe)
         dest['type'] = 'string'
         dest['value'] = symb.type
-        print(dest)
 
     elif "PUSHS" == instr.opcode:
         symb = instr.args[0]
@@ -597,15 +638,9 @@ while pc < len(instructions):
         if symb.type == 'var':
             symb = resolve_var(symb, framestack, tempframe)
 
-        if symb.type == 'int':
-            dest = get_var(dest, framestack, tempframe)
-            dest['type'] = 'string'
-            try:
-                dest['value'] = chr(symb.value)
-            except ValueError:
-                exit(RESULT_ERR_STRING_MANIPULATION)
-        else:
-            exit(RESULT_ERR_TYPE_COMPAT)
+        dest = get_var(dest, framestack, tempframe)
+        exec_int2char(dest, symb)
+
     elif "STRI2INT" == instr.opcode:
         dest = instr.args[0]
         sym1 = instr.args[1]
@@ -617,17 +652,9 @@ while pc < len(instructions):
         if sym2.type == 'var':
             sym2 = resolve_var(sym2, framestack, tempframe)
 
-        if sym1.type == 'string' and sym2.type == 'int':
-            dest = get_var(dest, framestack, tempframe)
+        dest = get_var(dest, framestack, tempframe)
+        exec_stri2int(dest, sym1, sym2)
 
-            if sym2.value >= len(sym1.value) or sym2.value < 0:
-                exit(RESULT_ERR_STRING_MANIPULATION)
-
-            char = sym1.value[sym2.value]
-            dest['value'] = ord(char)
-            dest['type'] = 'int'
-        else:
-            exit(RESULT_ERR_TYPE_COMPAT)
     elif "DPRINT" == instr.opcode:
         # TODO maybe DPRINT
         pass
@@ -635,5 +662,6 @@ while pc < len(instructions):
         # TODO maybe BREAK
         pass
     else:
-        sys.stderr.write("Unrecognized instruction: " + instr.opcode + "\n")
+        eprint("Unrecognized instruction: " + instr.opcode + "\n")
+        # TODO error code?
         exit(667)
