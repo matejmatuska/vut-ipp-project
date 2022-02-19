@@ -54,6 +54,17 @@ class TypedValue:
     def __str__(self):
         return f'TypedValue[type={self.type}, value={self.value}]'
 
+    def __eq__(self, other):
+        if not isinstance(other, TypedValue):
+            return False
+
+        if self.type == 'nil' or other.type == 'nil':
+            return True
+        elif self.type == other.type:
+            return self.value == other.value
+        else:
+            return False
+
 
 class Instruction:
 
@@ -194,7 +205,9 @@ def are_eq(sym1, sym2, framestack, tempframe):
     #print(sym1.type, sym1.value)
     #print(sym2.type, sym2.value)
     # TODO handle nil
-    if sym1.type == sym2.type or sym1.value == 'nil' or sym2.value == 'nil':
+    if sym1.value == 'nil' or sym2.value == 'nil':
+        return True
+    elif sym1.type == sym2.type:
         return sym1.value == sym2.value
     else:
         exit(RESULT_ERR_TYPE_COMPAT)
@@ -295,6 +308,7 @@ def exec_setchar(dest, sym1, sym2):
             exit(RESULT_ERR_STRING_MANIPULATION)
 
         s = dest.value 
+
         string = s[:sym1.value] + sym2.value[0] + s[sym1.value + 1:]
         # type is already string
         dest.value = string
@@ -331,18 +345,18 @@ def exec_relational(instr, framestack, tempframe, operation):
     sym1 = instr.args[1]
     sym2 = instr.args[2]
 
+    eprint(sym1)
+    eprint(sym2)
+
     if sym1.type == 'var':
         sym1 = resolve_var(sym1, framestack, tempframe)
 
     if sym2.type == 'var':
         sym2 = resolve_var(sym2, framestack, tempframe)
 
-    if sym1.type == sym2.type:
-        dest = get_var(dest, framestack, tempframe)
-        dest.type = 'bool'
-        dest.value = operation(sym1.value, sym2.value)
-    else:
-        exit(RESULT_ERR_TYPE_COMPAT)
+    dest = get_var(dest, framestack, tempframe)
+    dest.type = 'bool'
+    dest.value = operation(sym1, sym2)
 
 
 def exec_logical(instr, framestack, tempframe, operation):
@@ -549,7 +563,7 @@ while pc < len(instructions):
         if sym2.type == 'var':
             sym2 = resolve_var(sym2, framestack, tempframe)
 
-        dest = get_var(dest, framestack, tempframe)
+        dest = resolve_var(dest, framestack, tempframe)
         exec_setchar(dest, sym1, sym2)
 
     elif "TYPE" == instr.opcode:
@@ -608,11 +622,28 @@ while pc < len(instructions):
         exec_artihmetic_impl(dest, sym1, sym2, lambda a, b: a // b)
 
     elif "LT" == instr.opcode:
-        exec_relational(instr, framestack, tempframe, lambda a, b: a < b)
+        def lt(a, b):
+            if a.type == b.type and a.type != 'nil':
+                return a.value < b.value
+            else:
+                exit(RESULT_ERR_TYPE_COMPAT)
+        exec_relational(instr, framestack, tempframe, lt)
     elif "GT" == instr.opcode:
-        exec_relational(instr, framestack, tempframe, lambda a, b: a > b)
+        def gt(a, b):
+            if a.type == b.type and a.type != 'nil':
+                return a.value > b.value
+            else:
+                exit(RESULT_ERR_TYPE_COMPAT)
+        exec_relational(instr, framestack, tempframe, gt)
     elif "EQ" == instr.opcode:
-        exec_relational(instr, framestack, tempframe, lambda a, b: a == b)
+        def eq(a, b):
+            if a.type == 'nil' or b.type == 'nil':
+                return True
+            if a.type == b.type:
+                return a.value > b.value
+            else:
+                exit(RESULT_ERR_TYPE_COMPAT)
+        exec_relational(instr, framestack, tempframe, eq)
     elif "AND" == instr.opcode:
         exec_logical(instr, framestack, tempframe, lambda a, b: a and b)
     elif "OR" == instr.opcode:
