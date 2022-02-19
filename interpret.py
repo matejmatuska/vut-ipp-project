@@ -3,6 +3,10 @@ import sys;
 import xml.etree.ElementTree as ET
 
 RESULT_OK = 0
+RESULT_ERR_ARGUMENTS = 10
+RESULT_ERR_OPENING_INFILES = 11
+RESULT_ERR_OPENING_OUTFILES = 12
+
 RESULT_ERR_XML_FORMAT = 31
 RESULT_ERR_XML_STRUCTURE = 32
 
@@ -14,24 +18,31 @@ RESULT_ERR_MISSING_VALUE = 56
 RESULT_ERR_INVALID_OPERAND = 57
 RESULT_ERR_STRING_MANIPULATION = 58
 
+RESULT_ERR_INTERNAL = 99
+
 inputf = sys.stdin
-source = sys.stdin
+sourcef = sys.stdin
 
 for arg in sys.argv:
     arg = arg.split("=", 2)
-    if arg[0] == "interpret.py":
+    if arg[0] == "interpret.py" or arg[0] == "./interpret.py":
         pass # no-op
     elif arg[0] == "--help":
         # TODO print help
         exit(RESULT_OK);
     elif arg[0] == "--source":
-        inputf = arg[1]
+        if len(arg) == 1:
+            exit(RESULT_ERR_ARGUMENTS)
+        sourcef = arg[1]
     elif arg[0] == "--input":
-        source = arg[1]
+        if len(arg) == 1:
+            exit(RESULT_ERR_ARGUMENTS)
+        inputf = arg[1]
     else:
         sys.stderr.write("Unrecognized argument: " + arg[0] + "\n");
+        exit(RESULT_ERR_ARGUMENTS)
 
-tree = ET.parse(source)
+tree = ET.parse(sourcef)
 root = tree.getroot()
 if root.tag != "program":
     exit(RESULT_ERR_XML_FORMAT)
@@ -180,7 +191,7 @@ def are_eq(sym1, sym2, framestack, tempframe):
 
     #print(sym1.type, sym1.value)
     #print(sym2.type, sym2.value)
-    # TODO handle ni;
+    # TODO handle nil
     if sym1.type == sym2.type or sym1.value == 'nil' or sym2.value == 'nil':
         return sym1.value == sym2.value
     else:
@@ -313,6 +324,7 @@ labelmap = {}
 pc = 0 # program counter
 while pc < len(instructions):
     instr = instructions[pc]
+    # TODO dont allow negative order
     instructions[pc] = xml_parse_instruction(instr)
     pc = pc + 1
 
@@ -322,24 +334,19 @@ while pc < len(instructions):
             exit(RESULT_ERR_SEMANTICS)
         labelmap[label] = pc
 
-print("Label map:", labelmap)
+# print("Label map:", labelmap)
 
 pc = 0
 while pc < len(instructions):
     instr: Instruction = instructions[pc]
-    print(pc, 'instruction: ' + instr.opcode)
+    #print(pc, 'instruction: ' + instr.opcode)
     pc = pc + 1
 
-    # print(pc - 1, instr.opcode)
-    topframe = framestack[-1]
-
     if "DEFVAR" == instr.opcode:
-        # works with any frame
         arg = instr.args[0]
         exec_defvar(arg, framestack, tempframe)
 
     elif "MOVE" == instr.opcode:
-        # works with any frame
         dest = instr.args[0]
         src = instr.args[1]
 
@@ -413,6 +420,7 @@ while pc < len(instructions):
             pc = jump(labelmap, label)
 
     elif "READ" == instr.opcode:
+        # TODO allow reading from file
         dest = instr.args[0]
         type = instr.args[1]
 
@@ -428,6 +436,7 @@ while pc < len(instructions):
 
         if type.type == 'int':
             dest['type'] = 'int'
+            # TODO catch exception when converting failed
             dest['value'] = int(i)
         elif type.type == 'string':
             dest['type'] = 'string'
@@ -451,18 +460,12 @@ while pc < len(instructions):
         if symb.type == 'var':
             symb = resolve_var(symb, framestack, tempframe)
 
-        # TODO what if it isn't a string ??
         if symb.type != 'string':
             exit(RESULT_ERR_TYPE_COMPAT)
 
-        length = len(symb.value)
-        if dest.type == 'var':
-            var = get_var(dest, framestack, tempframe)
-            var['type'] = 'int'
-            var['value'] = length
-        else:
-            # TODO nejaky error
-            pass
+        var = get_var(dest, framestack, tempframe)
+        var['type'] = 'int'
+        var['value'] = len(symb.value)
 
     elif "GETCHAR" == instr.opcode:
         dest = instr.args[0]
@@ -514,7 +517,7 @@ while pc < len(instructions):
         if symb.type == 'var':
             symb = resolve_var(symb, framestack, tempframe, require_set=False)
             if symb.value is None:
-                # is symb is uninitialized variable type is empty string
+                # if symb is uninitialized variable type is empty string
                 symb.type = ''
 
         dest = get_var(dest, framestack, tempframe)
@@ -625,9 +628,12 @@ while pc < len(instructions):
             dest['type'] = 'int'
         else:
             exit(RESULT_ERR_TYPE_COMPAT)
+    elif "DPRINT" == instr.opcode:
+        # TODO maybe DPRINT
+        pass
+    elif "BREAK" == instr.opcode:
+        # TODO maybe BREAK
+        pass
     else:
         sys.stderr.write("Unrecognized instruction: " + instr.opcode + "\n")
         exit(667)
-
-
-print(framestack)
