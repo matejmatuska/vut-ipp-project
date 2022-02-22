@@ -56,6 +56,7 @@ foreach($argv as $arg) {
 }
 
 if (substr($directory, -1) != "/")
+    // TODO for every arg
     $directory .= "/";
 
 if (!file_exists($directory)) {
@@ -103,23 +104,38 @@ function exec_test($test, $outfile, $html) {
     global $parser, $interpret, $test_parser, $test_interpret;
 
     echo "Running test: $test\n";
-    if (!exec("php $parser < $test.src > $outfile.xml", result_code: $retcode)) {
-        //TODO failed to exec
+    $command = "php $parser < $test.src > $outfile.xml";
+    if (exec($command, result_code: $retcode) === false) {
+        echo "Failed executing shell command: $command $\n";
+        return false;
     }
 
     // get expected return code from rc file
     $expect_rc = 0;
-    $rc_filename = $test.".rc";
-    if (file_exists($rc_filename)) { //TODO if it doesnt we have to create it
-        $rc_file = fopen($rc_filename, "r");
-        if ($rc_file === false) {
+    $test_rc = $test.".rc";
+    if (file_exists($test_rc)) { //TODO if it doesnt we have to create it
+        $f = fopen($test_rc, "r");
+        if ($f === false) {
             //TODO failed opening rc file
             exit(667);
         }
-        fscanf($rc_file, "%d", $expect_rc); //TODO error checking
-        fclose($rc_file);
+        fscanf($f, "%d", $expect_rc); //TODO error checking
+        fclose($f);
     } else {
-        echo "rc file does not exist\n";
+        echo "File $test_rc missing, generating it...\n";
+        fopen($test_rc, 'c');
+    }
+
+    $test_out = $test.".out";
+    if (!file_exists($test_out)) {
+        echo "File $test_out missing, generating it...\n";
+        fopen($test_out, 'c');
+    }
+
+    $test_in = $test.".in";
+    if (!file_exists($test_in)) {
+        echo "File $test_in missing, generating it...\n";
+        fopen($test_in, 'c');
     }
 
     if ($test_parser && !$test_interpret) {
@@ -131,8 +147,9 @@ function exec_test($test, $outfile, $html) {
             $expect_out = $test.".out";
             // TODO respect $jexampath setting
             $command = "java -jar jexamxml.jar $outfile.xml $expect_out -M options";
-            if (!exec($command, result_code: $xml_rc)) {
+            if (exec($command, result_code: $xml_rc) === false) {
                 echo "Failed executing jexamxml\n";
+                return false;
             }
             generate_html($html, $test, true, $xml_rc == 0);
         } else if ($expect_rc != $retcode) {
@@ -142,26 +159,26 @@ function exec_test($test, $outfile, $html) {
         }
     }
     if ($test_interpret) {
-        // TODO add input / source
         if ($test_parser) 
-            $src_file = $outfile.".xml";
+            $test_src = $outfile.".xml";
         else
-            $src_file = $test.".src";
+            $test_src = $test.".src";
 
-        $command = "python3 $interpret < $src_file > $outfile.out";
+        $command = "python3.8 $interpret --input=$test_in < $test_src > $outfile.out";
         if (exec($command, result_code: $int_rc) === false) {
             echo "Failed executing interpreter\n";
-            // TODO should we exit?
+            return false;
         }
         echo "Expected: ".$expect_rc." got: ".$int_rc."\n";
         if ($expect_rc == 0 && $int_rc == 0) {
             // compare interpreter output
             echo "Comparing diff outputs...\n";
 
-            $command = "diff $outfile.out $test.out";
-            if (!exec($command, result_code: $diff_rc)) {
-                echo "Failed executing diff, exit code: $diff_rc";
-                // TODO should we exit?
+            $command = "diff -Z $outfile.out $test.out";
+
+            if (exec($command, result_code: $diff_rc) === false) {
+                echo "Failed executing diff, exit code: $diff_rc\n";
+                return false;
             }
             generate_html($html, $test, true, $diff_rc == 0);
         } elseif ($expect_rc == $int_rc) {
@@ -170,6 +187,7 @@ function exec_test($test, $outfile, $html) {
             generate_html($html, $test, false, true);
         }
     }
+    return true;
 }
 
 function exec_tests_rec($dir, $path, $recursive, $html)
@@ -190,8 +208,8 @@ function exec_tests_rec($dir, $path, $recursive, $html)
             }
         } elseif (is_file($dir.$path.$file)) {
             // exec the test
-            $extension = pathinfo($file,  PATHINFO_EXTENSION);
-            $filename = pathinfo($file,  PATHINFO_FILENAME);
+            $extension = pathinfo($file, PATHINFO_EXTENSION);
+            $filename = pathinfo($file, PATHINFO_FILENAME);
             if ($extension == "src") {
                 // prepare outfile
                 $out_dir = TEST_OUT_DIR.$path;
@@ -199,7 +217,9 @@ function exec_tests_rec($dir, $path, $recursive, $html)
                     mkdir($out_dir, recursive: true);
 
                 $outfile = $out_dir.$filename; // out file without extension
-                exec_test($dir.$path.$filename, $outfile, $html);
+                $result = exec_test($dir.$path.$filename, $outfile, $html);
+                if ($result === false)
+                    echo "Failed executing test, continuing with next one...\n";
             }
         } else {
             echo "File is not a regular file or directory: $file\n";
@@ -232,15 +252,17 @@ function html_end($html) {
 }
 
 function generate_html($html, $testpath, $good_rc, $good_out) {
-    $result = "Passed";
-    $desc = "";
     if (!$good_rc) {
         $result = "Failed";
-        if (!$good_out)
-            $desc = "Bad output";
-        else
-            $desc = "Bad exit code";
+        $desc = "Bad exit code";
+    } elseif (!$good_out) {
+        $result = "Failed";
+        $desc = "Bad output";
+    } else {
+        $result = "Passed";
+        $desc = "";
     }
+
     $row = "<tr>
         <td>$testpath</td>
         <td>$result</td>
