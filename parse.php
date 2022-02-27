@@ -1,5 +1,4 @@
 <?php
-// TODO stderr
 define("RESULT_OK", 0);
 define("RESULT_ERR_MISSING_ARG", 10);
 define("RESULT_ERR_INVALID_ARGS", 10);
@@ -11,19 +10,24 @@ define("RESULT_ERR_INVALID_HEADER", 21);
 define("RESULT_ERR_MISSING_HEADER", 21);
 define("RESULT_ERR_INVALID_OPCODE", 22);
 define("RESULT_ERR_MISSING_OPCODE", 22);
-define("RESULT_ERR_OTHER_LEX", 23);
-define("RESULT_ERR_OTHER_SYNTAX", 23);
+define("RESULT_ERR_LEX_OR_SYNTAX", 23);
 
 define("RESULT_ERR_INTERNAL", 99);
 
 ini_set('display_errors', 'stderr');
 
-if ($argc == 2 && strcmp("--help", $argv[1]) == 0) {
-    echo "Usage: parse|parse --help\n";
-    exit(RESULT_OK);
+/**
+ * Prints string to STDERR
+ */
+function eprint(string $data, ?int $length = null): int|false {
+    return fwrite(STDERR, $data, $length);
 }
-else if ($argc >= 2) {
-    echo "Unexpected arguments, see parse.php --help for usage\n";
+
+if ($argc == 2 && strcmp("--help", $argv[1]) == 0) {
+    eprint("Usage: parse|parse --help\n");
+    exit(RESULT_OK);
+} else if ($argc >= 2) {
+    eprint("Unexpected arguments, see parse.php --help for usage\n");
     exit(RESULT_ERR_INVALID_ARGS);
 }
 
@@ -160,7 +164,7 @@ function xml_gen_symb($instr_xml, $index, $value) {
     } elseif (check_const($value)) {
         xml_gen_const($instr_xml, $index, $value);
     } else {
-        exit(RESULT_ERR_OTHER_SYNTAX);
+        exit(RESULT_ERR_LEX_OR_SYNTAX);
     }
 }
 
@@ -189,10 +193,10 @@ function parse_instr($opcode, $args, $xml_parent, $order) {
         case "DEFVAR":
         case "POPS":
             if (count($args) != 1)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
 
             if (check_var($args[0]) == 0)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
 
             xml_gen_var($instr, 0, $args[0]);
             break;
@@ -204,12 +208,12 @@ function parse_instr($opcode, $args, $xml_parent, $order) {
         case "STRLEN":
         case "TYPE":
             if (count($args) != 2)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
 
             if (check_var($args[0]) == 0)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
             if (check_symb($args[1]) == 0)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
 
             xml_gen_var($instr, 0, $args[0]);
             xml_gen_symb($instr, 1, $args[1]);
@@ -220,10 +224,10 @@ function parse_instr($opcode, $args, $xml_parent, $order) {
         case "LABEL":
         case "JUMP":
             if (count($args) != 1)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
 
             if (check_label($args[0]) == 0)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
 
             xml_gen_label($instr, 0, $args[0]);
             break;
@@ -232,14 +236,14 @@ function parse_instr($opcode, $args, $xml_parent, $order) {
         case "JUMPIFEQ":
         case "JUMPIFNEQ":
             if (count($args) != 3)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
 
             if (check_label($args[0]) == 0)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
             if (check_symb($args[1]) == 0)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
             if (check_symb($args[2]) == 0)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
 
             xml_gen_label($instr, 0, $args[0]);
             xml_gen_symb($instr, 1, $args[1]);
@@ -249,13 +253,13 @@ function parse_instr($opcode, $args, $xml_parent, $order) {
         // var type
         case "READ":
             if (count($args) != 2)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
 
             if (check_var($args[0]) == 0)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
 
             if (check_type($args[1]) == 0)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
 
             xml_gen_var($instr, 0, $args[0]);
             xml_gen_type($instr, 1, $args[1]);
@@ -267,10 +271,10 @@ function parse_instr($opcode, $args, $xml_parent, $order) {
         case "EXIT":
         case "DPRINT":
             if (count($args) != 1)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
 
             if (check_symb($args[0]) == 0) {
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
             }
 
             xml_gen_symb($instr, 0, $args[0]);
@@ -283,7 +287,7 @@ function parse_instr($opcode, $args, $xml_parent, $order) {
         case "RETURN":
         case "BREAK":
             if (count($args) != 0)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
             break;
 
         // var sym1 sym2
@@ -301,14 +305,14 @@ function parse_instr($opcode, $args, $xml_parent, $order) {
         case "SETCHAR":
         case "CONCAT":
             if (count($args) != 3)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
 
             if (check_var($args[0]) == 0)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
             if (check_symb($args[1]) == 0)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
             if (check_symb($args[2]) == 0)
-                exit(RESULT_ERR_OTHER_SYNTAX);
+                exit(RESULT_ERR_LEX_OR_SYNTAX);
 
             xml_gen_var($instr, 0, $args[0]);
             xml_gen_symb($instr, 1, $args[1]);
@@ -316,13 +320,12 @@ function parse_instr($opcode, $args, $xml_parent, $order) {
             break;
 
         default:
-            echo "Unhandled or unrecognized instruction: ".$args[0]."\n";
+            eprint("Unhandled or unrecognized instruction: ".$args[0]."\n");
             exit(RESULT_ERR_INVALID_OPCODE);
     }
 }
 
 $order = 1;
-// parse all instructions
 while ($line = fgets(STDIN)) {
     $line = strip_comment($line);
     $line = trim($line);
@@ -331,11 +334,11 @@ while ($line = fgets(STDIN)) {
         continue; // ignore empty lines (the ones containing just comment)
 
     if (!$has_header) {
-        if ($line == ".IPPcode22") {
+        if (strcasecmp($line, ".IPPcode22") == 0) {
             $has_header = true;
             continue;
         } else {
-            echo "Missing file header\n";
+            eprint("Missing file header\n");
             exit(RESULT_ERR_MISSING_HEADER);
         }
     }
