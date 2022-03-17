@@ -1,4 +1,11 @@
 <?php
+/*
+ * IPPcode22 parser
+ *
+ * Matej Matuška
+ * xmatus36
+ * 2022-03-16
+ */
 define("RESULT_OK", 0);
 define("RESULT_ERR_MISSING_ARG", 10);
 define("RESULT_ERR_INVALID_ARGS", 10);
@@ -67,13 +74,15 @@ function check_type($type) {
 }
 
 /**
- * Checks whether string is a valid constant, including type definition
+ * Checks whether string is a valid literal, including type definition
  */
-function check_const($const) {
-    return preg_match("/^int@[+-]?\d+$/", $const)
-        || preg_match('/^string@(\\\\\d\d\d|[^\x00-\x20\x23\x5C])*$/u', $const)
-        || $const == "bool@true" || $const == "bool@false"
-        || $const == "nil@nil";
+function check_literal($lit) {
+    return preg_match("/^int@[+-]?[0-9]+(_[0-9]+)*$/", $lit)            // decimal
+        || preg_match("/^int@0[xX][0-9a-fA-F]+(_[0-9a-fA-F]+)*/", $lit) // hexadecimal
+        || preg_match("/^int@0[oO]?[0-7]+(_[0-7]+)*", $lit)             // octal
+        || preg_match('/^string@(\\\\\d\d\d|[^\x00-\x20\x23\x5C])*$/u', $lit)
+        || $lit == "bool@true" || $lit == "bool@false"
+        || $lit == "nil@nil";
 }
 
 /**
@@ -83,7 +92,7 @@ function check_const($const) {
  */
 function check_symb($symb) {
     // const or var
-    return (check_var($symb) || check_const($symb));
+    return (check_var($symb) || check_literal($symb));
 }
 
 /**
@@ -141,7 +150,7 @@ function xml_gen_type($instr_xml, $index, $value) {
  * @param index argument index
  * @param value constant value including type specifier
  */
-function xml_gen_const($instr_xml, $index, $value) {
+function xml_gen_literal($instr_xml, $index, $value) {
     $type_and_val = explode('@', $value, 2);
     if ($type_and_val[1] == "string") {
         xml_convert_special_chars(type_and_val[1]);
@@ -161,14 +170,12 @@ function xml_gen_symb($instr_xml, $index, $value) {
     // const or var
     if (check_var($value)) {
         xml_gen_var($instr_xml, $index, $value);
-    } elseif (check_const($value)) {
-        xml_gen_const($instr_xml, $index, $value);
+    } elseif (check_literal($value)) {
+        xml_gen_literal($instr_xml, $index, $value);
     } else {
         exit(RESULT_ERR_LEX_OR_SYNTAX);
     }
 }
-
-$has_header = false;
 
 $xml = new SimpleXMLElement(
     '<?xml version="1.0" encoding="UTF-8"?><program></program>');
@@ -325,6 +332,8 @@ function parse_instr($opcode, $args, $xml_parent, $order) {
     }
 }
 
+$has_header = false;
+
 $order = 1;
 while ($line = fgets(STDIN)) {
     $line = strip_comment($line);
@@ -342,7 +351,6 @@ while ($line = fgets(STDIN)) {
             exit(RESULT_ERR_MISSING_HEADER);
         }
     }
-
     $split = preg_split("/\s+/", $line);
     $opcode = strtoupper(array_shift($split));
 
