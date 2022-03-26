@@ -1,9 +1,13 @@
 <?php
-// TODO noclean
+// TODO counters
 define("RESULT_OK", 0);
 define("RESULT_ERR_MISSING_ARG", 10);
 define("RESULT_ERR_INVALID_ARGS", 10);
+
+define("RESULT_ERR_OPENING_IN_FILE", 11);
+define("RESULT_ERR_OPENING_OUT_FILE", 12);
 define("RESULT_ERR_MISSING_FILE", 41);
+define("RESULT_ERR_INTERNAL", 99);
 
 // test output directory
 const TEST_OUT_DIR = "test-out/";
@@ -115,10 +119,10 @@ if (!file_exists($jexampath."jexamxml.jar")) {
  * @return false if test execution failed, true otherwise
  */
 function exec_test($test, $outfile) {
-    global $parser, $interpret, $test_parser, $test_interpret, $jexampath;
+    global $parser, $interpret, $test_parser, $test_interpret, $jexampath, $clean;
 
     eprint("Running test: $test\n");
-    $command = "php $parser < $test.src > $outfile.xml";
+    $command = "php8.1 $parser < $test.src > $outfile.xml";
     if (exec($command, result_code: $retcode) === false) {
         eprint("Failed executing shell command: $command $\n");
         return false;
@@ -130,8 +134,8 @@ function exec_test($test, $outfile) {
     if (file_exists($test_rc)) {
         $f = fopen($test_rc, 'r');
         if ($f === false) {
-            //TODO failed opening rc file
-            exit(667);
+            eprint("Failed opening .rc file\n");
+            exit(RESULT_ERR_OPENING_IN_FILE);
         }
         fscanf($f, "%d", $expect_rc); //TODO error checking
         fclose($f);
@@ -139,10 +143,10 @@ function exec_test($test, $outfile) {
         eprint("File $test_rc missing, generating it...\n");
         $f = fopen($test_rc, 'w');
         if ($f === false) {
-            //TODO failed opening rc file
-            exit(667);
+            eprint("Failed creating .rc file\n");
+            exit(RESULT_ERR_INTERNAL);
         }
-        fwrite($f, '0');
+        fwrite($f, '0'); // implicit value
         fclose($f);
     }
 
@@ -166,8 +170,7 @@ function exec_test($test, $outfile) {
             eprint("Comparing outputs...\n");
             // compare parser xml output
             $expect_out = $test.".out";
-            // TODO what about options
-            $command = "java -jar $jexampath"."jexamxml.jar $outfile.xml $expect_out -M options";
+            $command = "java -jar $jexampath"."jexamxml.jar $outfile.xml $expect_out";
             if (exec($command, result_code: $xml_rc) === false) {
                 eprint("Failed executing jexamxml\n");
                 return false;
@@ -185,7 +188,6 @@ function exec_test($test, $outfile) {
         else
             $test_src = $test.".src";
 
-        // TODO probably rename pyton3.8 to merlin python name
         $command = "python3.8 $interpret --input=$test_in < $test_src > $outfile.out";
         if (exec($command, result_code: $int_rc) === false) {
             eprint("Failed executing interpreter\n");
@@ -207,17 +209,25 @@ function exec_test($test, $outfile) {
         } else {
             generate_html($test, false, true);
         }
+
+        if ($clean) {
+            unlink($outfile.".out");
+        }
+    }
+    if ($clean) {
+        unlink($outfile.".xml");
     }
     return true;
 }
 
 function exec_tests_rec($dir, $path, $recursive)
 {
+    global $clean;
     eprint("In dir: $dir path: $path\n");
     $files = scandir($dir.$path);
     if (!$files) {
         eprint("Failed opening directory: ".$dir.$path."\n");
-        exit(666); //TODO error code
+        exit(RESULT_ERR_OPENING_IN_FILE);
     }
 
     foreach ($files as $file) {
@@ -226,6 +236,10 @@ function exec_tests_rec($dir, $path, $recursive)
             // descend into dir
             if ($recursive && $file != "." && $file != "..") {
                 exec_tests_rec($dir, $path.$file."/", $recursive);
+                if ($clean) {
+                    // remove test dir
+                    rmdir(TEST_OUT_DIR.$path.$file);
+                }
             }
         } elseif (is_file($dir.$path.$file)) {
             // exec the test
@@ -268,6 +282,7 @@ function html_end() {
     print($footer);
 }
 
+// TODO nicer html
 function generate_html($testpath, $good_rc, $good_out) {
     if (!$good_rc) {
         $result = "Failed";
@@ -299,8 +314,4 @@ eprint("Running in: $directory\n");
 exec_tests_rec($directory, "", $recursive);
 
 html_end();
-
-if ($clean) {
-    // TODO clean
-}
 ?>
