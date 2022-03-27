@@ -58,12 +58,12 @@ if inputf is None and sourcef is None:
 if sourcef is None:
     sourcef = sys.stdin
 
-# we must parse the XML tree before changing sys.stdin
+# !!! we must parse the XML tree before changing sys.stdin
 try:
     xmltree = ET.parse(sourcef)
 except FileNotFoundError:
     eprint("Source file does not exist:", sourcef)
-    exit(2) # TODO error code
+    exit(RESULT_ERR_OPENING_INFILES)
 except ET.ParseError:
     eprint("Failed parsing XML")
     exit(RESULT_ERR_XML_FORMAT)
@@ -94,39 +94,47 @@ class TypedValue:
 
 
 class Instruction:
-
-    def __init__(self, opcode, args):
+    def __init__(self, opcode, order, args):
         self.opcode = opcode
+        self.order = order
         self.args = args
 
 
-def xml_parse_instruction(xmlInstr):
-    if 'opcode' in xmlInstr.attrib:
-        opcode = xmlInstr.attrib['opcode']
+# parse instruction from xml element
+def xml_parse_instruction(xml_instr):
+    if 'opcode' in xml_instr.attrib:
+        opcode = xml_instr.attrib['opcode']
     else:
         exit(RESULT_ERR_XML_STRUCTURE)
 
-    if 'order' in xmlInstr.attrib:
-        # TODO ValueError
-        order = int(xmlInstr.attrib['order'])
+    if 'order' in xml_instr.attrib:
+        try:
+            order = int(xml_instr.attrib['order'])
+        except ValueError:
+            eprint('Instruction attribute "order" must be positive intiger')
+            exit(RESULT_ERR_XML_STRUCTURE)
     else:
         exit(RESULT_ERR_XML_STRUCTURE)
 
-    if order < 0:
+    if order <= 0:
         eprint('Attribute "order" must be a positive number, was:', order)
         exit(RESULT_ERR_XML_STRUCTURE)
 
+    xml_args = sorted(xml_instr.iter(), key=lambda child: child.tag);
+
     args = []
-    for arg in xmlInstr.iter():
-        if (xmlInstr == arg):
+    for arg in xml_args:
+        if (xml_instr == arg):
+            # iteration over xml element iterates throught itself
+            # so we need to skip it
             continue
-        # TODO sort
-        order, arg = xml_parse_arg(arg)
-        args[order] = arg
 
-    return Instruction(opcode, args)
+        arg = xml_parse_arg(arg)
+        args.append(arg)
 
+    return Instruction(opcode, order, args)
 
+# Parse argument from xml element
 def xml_parse_arg(arg):
     type = arg.attrib['type']
     value = arg.text
@@ -136,15 +144,17 @@ def xml_parse_arg(arg):
         exit(RESULT_ERR_XML_STRUCTURE)
 
     if type == 'int':
-        value = int(value)
+        try:
+            value = int(value)
+        except ValueError:
+            exit(RESULT_ERR_XML_STRUCTURE)
+
     elif type == 'bool':
         if value == "true":
             value = True;
-        elif value == "false":
-            value = False;
         else:
-            # TODO err code
-            exit(666)
+            value = False;
+
     elif type == 'string':
         if value is None:
             value = ''
@@ -160,16 +170,20 @@ def xml_parse_arg(arg):
     elif type == 'nil':
         value = 'nil'
 
-    return arg.tag[:-1], TypedValue(type, value)
+    return TypedValue(type, value)
 
 
+# Returns address of the label or exits with an error
 def jump(labelmap, label):
     if label in labelmap:
         return labelmap[label]
     else:
+        eprint("JUMP: Undefined label: ", label)
         exit(RESULT_ERR_SEMANTICS)
 
 
+# Implementation of DEFVAR instruction
+# Exits with error if variable is already defined
 def exec_defvar(arg, framestack, tempframe):
     (frame_id, name) = tuple(arg.value.split('@', 2))
 
@@ -184,7 +198,7 @@ def exec_defvar(arg, framestack, tempframe):
             exit(RESULT_ERR_FRAME_NONEXISTENT)
         frame = tempframe
     else:
-        exit(456)
+        exit(7)
 
     if name in frame:
         eprint('DEFVAR variable is already defined: ', arg.value)
@@ -193,6 +207,7 @@ def exec_defvar(arg, framestack, tempframe):
     frame[name] = TypedValue(None, None)
 
 
+# Implementation of EXIT instruction
 def exec_exit(exit_code):
     if exit_code.value is None:
         exit(RESULT_ERR_MISSING_VALUE)
@@ -209,7 +224,6 @@ def exec_exit(exit_code):
 
 
 def get_var(arg, framestack, tempframe):
-
     (frame_id, name) = tuple(arg.value.split('@', 2))
 
     if frame_id == 'GF':
@@ -225,7 +239,7 @@ def get_var(arg, framestack, tempframe):
             exit(RESULT_ERR_FRAME_NONEXISTENT)
         frame = tempframe
     else:
-        exit(456)
+        exit(7)
 
     if name not in frame:
         exit(RESULT_ERR_UNDEFINED_VAR)
@@ -234,6 +248,9 @@ def get_var(arg, framestack, tempframe):
 
 
 def resolve_symbol(symb, framestack, tempframe, require_set = True):
+    """
+    If symbol is a variable resolves it to its actual value and type
+    """
     if symb.type == 'var':
         symb = get_var(symb, framestack, tempframe)
         if require_set and symb.value is None:
@@ -242,6 +259,24 @@ def resolve_symbol(symb, framestack, tempframe, require_set = True):
 
 
 def exec_binary(instr, op, framestack, tempframe):
+    """
+    Executes binary instruction
+
+    Instruction arguments must have the following types:
+    [variable, symbol, symbol]
+
+    Paramaters
+    ----------
+
+    instr : Instruction
+        The instruction
+    op :
+        Implementation of instruction
+    framestack :
+        Stack of frames
+    tempframe :
+        Temporary frame
+    """
     dest, a, b = tuple(instr.args)
 
     dest = get_var(dest, framestack, tempframe)
@@ -289,10 +324,6 @@ def exec_read(dest, type):
     elif type.value == 'bool':
         dest.type = 'bool'
         dest.value = i.casefold() == 'true'
-    else:
-        eprint("READ TODO type:", type)
-        # TODO
-        pass
 
 
 def exec_write(arg):
@@ -408,8 +439,14 @@ root = xmltree.getroot()
 if root.tag != "program":
     exit(RESULT_ERR_XML_STRUCTURE)
 
-instructions = list(root.iter("instruction"))
-instructions.sort(key=lambda instr: int(instr.attrib['order']))
+instructions = []
+for elem in root.findall('./'):
+    if elem.tag != 'instruction':
+        exit(RESULT_ERR_XML_STRUCTURE)
+    instr = xml_parse_instruction(elem)
+    instructions.append(instr)
+
+instructions.sort(key=lambda instr: instr.order)
 
 datastack = []
 callstack = []
@@ -422,13 +459,17 @@ tempframe = None
 labelmap = {}
 
 pc = 0 # program counter
+prev_order = -1
 while pc < len(instructions):
     instr = instructions[pc]
-    instructions[pc] = xml_parse_instruction(instr)
+    if instr.order == prev_order:
+        exit(RESULT_ERR_XML_STRUCTURE)
+    prev_order = instr.order
+
     pc = pc + 1
 
-    if instr.attrib['opcode'] == 'LABEL':
-        label = instr.find('arg1').text
+    if instr.opcode == 'LABEL':
+        label = instr.args[0].value
         if label in labelmap:
             exit(RESULT_ERR_SEMANTICS)
         labelmap[label] = pc
@@ -436,12 +477,10 @@ while pc < len(instructions):
 pc = 0
 while pc < len(instructions):
     instr: Instruction = instructions[pc]
-    #eprint(pc, 'instruction: ' + instr.opcode)
     pc = pc + 1
 
     if "DEFVAR" == instr.opcode:
-        arg = instr.args[0]
-        exec_defvar(arg, framestack, tempframe)
+        exec_defvar(instr.args[0], framestack, tempframe)
 
     elif "MOVE" == instr.opcode:
         dest = instr.args[0]
@@ -460,6 +499,7 @@ while pc < len(instructions):
         dest.value = src.value
 
     elif "LABEL" == instr.opcode:
+        # labels are processed before execution loop
         pass
 
     elif "CALL" == instr.opcode:
@@ -474,9 +514,7 @@ while pc < len(instructions):
         pc = callstack.pop()
 
     elif "EXIT" == instr.opcode:
-        exit_code = instr.args[0]
-        exit_code = resolve_symbol(exit_code, framestack, tempframe)
-
+        exit_code = resolve_symbol(instr.args[0], framestack, tempframe)
         exec_exit(exit_code)
 
     elif "CREATEFRAME" == instr.opcode:
@@ -518,8 +556,7 @@ while pc < len(instructions):
         exec_read(dest, type)
 
     elif "WRITE" == instr.opcode:
-        arg = instr.args[0]
-        arg = resolve_symbol(arg, framestack, tempframe)
+        arg = resolve_symbol(instr.args[0], framestack, tempframe)
         exec_write(arg)
 
     elif "CONCAT" == instr.opcode:
@@ -527,7 +564,6 @@ while pc < len(instructions):
 
     elif "STRLEN" == instr.opcode:
         dest, symb = tuple(instr.args)
-
         symb = resolve_symbol(symb, framestack, tempframe)
 
         if symb.type != 'string':
@@ -558,10 +594,7 @@ while pc < len(instructions):
         dest.type = 'string'
 
     elif "PUSHS" == instr.opcode:
-        symb = instr.args[0]
-
-        symb = resolve_symbol(symb, framestack, tempframe)
-
+        symb = resolve_symbol(instr.args[0], framestack, tempframe)
         datastack.append(symb)
 
     elif "POPS" == instr.opcode:
@@ -599,6 +632,7 @@ while pc < len(instructions):
             else:
                 exit(RESULT_ERR_TYPE_COMPAT)
         exec_relational(instr, framestack, tempframe, lt)
+
     elif "GT" == instr.opcode:
         def gt(a, b):
             if a.type == b.type and a.type != 'nil':
@@ -606,6 +640,7 @@ while pc < len(instructions):
             else:
                 exit(RESULT_ERR_TYPE_COMPAT)
         exec_relational(instr, framestack, tempframe, gt)
+
     elif "EQ" == instr.opcode:
         def eq(a, b):
             if a.type == 'nil' and b.type == 'nil':
@@ -616,6 +651,7 @@ while pc < len(instructions):
                 return a.value == b.value
             else:
                 exit(RESULT_ERR_TYPE_COMPAT)
+
         exec_relational(instr, framestack, tempframe, eq)
     elif "AND" == instr.opcode:
         exec_logical(instr, framestack, tempframe, lambda a, b: a and b)
@@ -642,14 +678,12 @@ while pc < len(instructions):
         exec_binary(instr, exec_stri2int, framestack, tempframe)
 
     elif "DPRINT" == instr.opcode:
-        symb = instr.args[0]
-        symb = resolve_symbol(symb, framestack, tempframe)
+        symb = resolve_symbol(instr.args[0], framestack, tempframe)
         eprint(symb.value)
 
     elif "BREAK" == instr.opcode:
         # TODO maybe BREAK
         pass
     else:
-        eprint("Unrecognized instruction: " + instr.opcode + "\n")
-        # TODO error code?
-        exit(667)
+        eprint("Invalid opcode: ", instr.opcode)
+        exit(RESULT_ERR_XML_STRUCTURE)
