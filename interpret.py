@@ -236,42 +236,7 @@ def exec_exit(exit_code):
     exit(exit_code.value)
 
 
-def get_var(arg, framestack, tempframe):
-    (frame_id, name) = tuple(arg.value.split('@', 2))
-
-    if frame_id == 'GF':
-        frame = framestack[0]
-    elif frame_id == 'LF':
-        if len(framestack) == 1:
-            eprint("No LF available")
-            exit(RESULT_ERR_FRAME_NONEXISTENT)
-        frame = framestack[-1]
-    elif frame_id == 'TF':
-        if tempframe is None:
-            eprint("TF is not initialized")
-            exit(RESULT_ERR_FRAME_NONEXISTENT)
-        frame = tempframe
-    else:
-        exit(7) # TODO
-
-    if name not in frame:
-        exit(RESULT_ERR_UNDEFINED_VAR)
-
-    return frame[name]
-
-
-def resolve_symbol(symb, framestack, tempframe, require_set = True):
-    """
-    If symbol is a variable resolves it to its actual value and type
-    """
-    if symb.type == Type.VAR:
-        symb = get_var(symb, framestack, tempframe)
-        if require_set and symb.value is None:
-            exit(RESULT_ERR_MISSING_VALUE)
-    return symb
-
-
-def exec_binary(instr, op, framestack, tempframe):
+def exec_binary(instr, op, frames):
     """
     Executes binary instruction
 
@@ -292,16 +257,16 @@ def exec_binary(instr, op, framestack, tempframe):
     """
     dest, a, b = tuple(instr.args)
 
-    dest = get_var(dest, framestack, tempframe)
-    a = resolve_symbol(a, framestack, tempframe)
-    b = resolve_symbol(b, framestack, tempframe)
+    dest = frames.get_var(dest)
+    a = frames.resolve_symbol(a)
+    b = frames.resolve_symbol(b)
 
     op(dest, a, b)
 
 
-def are_eq(sym1, sym2, framestack, tempframe):
-    sym1 = resolve_symbol(sym1, framestack, tempframe)
-    sym2 = resolve_symbol(sym2, framestack, tempframe)
+def are_eq(sym1, sym2, frames):
+    sym1 = frames.resolve_symbol(sym1, frames)
+    sym2 = frames.resolve_symbol(sym2, frames)
 
     if sym1.type == Type.NIL and sym2.type == Type.NIL:
         return True
@@ -350,7 +315,7 @@ def exec_write(arg):
             print("false", end='')
     elif arg.type == Type.NIL:
         pass
-    elif arg.type == Type.TYPE:
+    elif isinstance(arg.value, Type):
         if (arg.value != Type.UNDEF):
             print(arg.value.name.lower(), end='')
     else:
@@ -418,7 +383,7 @@ def exec_setchar(dest, sym1, sym2):
         exit(RESULT_ERR_TYPE_COMPAT)
 
 
-def exec_artihmetic(instr, framestack, tempframe, operation):
+def exec_artihmetic(instr, frames, operation):
     def op(dest, a, b):
         if a.type == Type.INT and b.type == Type.INT:
             dest.type = Type.INT
@@ -426,28 +391,28 @@ def exec_artihmetic(instr, framestack, tempframe, operation):
         else:
             exit(RESULT_ERR_TYPE_COMPAT)
 
-    exec_binary(instr, op, framestack, tempframe)
+    exec_binary(instr, op, frames)
 
 
-def exec_relational(instr, framestack, tempframe, operation):
+def exec_relational(instr, frames, operation):
     dest, sym1, sym2 = tuple(instr.args)
 
-    sym1 = resolve_symbol(sym1, framestack, tempframe)
-    sym2 = resolve_symbol(sym2, framestack, tempframe)
+    sym1 = frames.resolve_symbol(sym1)
+    sym2 = frames.resolve_symbol(sym2)
 
-    dest = get_var(dest, framestack, tempframe)
+    dest = frames.get_var(dest)
     dest.type = Type.BOOL
     dest.value = operation(sym1, sym2)
 
 
-def exec_logical(instr, framestack, tempframe, operation):
+def exec_logical(instr, frames, operation):
     dest, sym1, sym2 = tuple(instr.args)
 
-    sym1 = resolve_symbol(sym1, framestack, tempframe)
-    sym2 = resolve_symbol(sym2, framestack, tempframe)
+    sym1 = frames.resolve_symbol(sym1)
+    sym2 = frames.resolve_symbol(sym2)
 
     if sym1.type == Type.BOOL and sym2.type == Type.BOOL:
-        dest = get_var(dest, framestack, tempframe)
+        dest = frames.get_var(dest)
         dest.type = Type.BOOL
         dest.value = operation(sym1.value, sym2.value)
     else:
@@ -467,17 +432,92 @@ for elem in root.findall('./'):
 
 instructions.sort(key=lambda instr: instr.order)
 
+class Frames:
+    def __init__(self):
+        self.framestack = []
+        self.framestack.append({}) # add global frame
+        self.tempframe = None
 
-        self.tempframe = []
+    def defvar(self, var):
+        (frame_id, name) = tuple(var.value.split('@', 2))
+
+        if frame_id == 'GF':
+            frame = self.framestack[0]
+        elif frame_id == 'LF':
+            if len(self.framestack) == 1:
+                exit(RESULT_ERR_FRAME_NONEXISTENT)
+            frame = self.framestack[-1]
+        elif frame_id == 'TF':
+            if self.tempframe is None:
+                exit(RESULT_ERR_FRAME_NONEXISTENT)
+            frame = self.tempframe
+        else:
+            # should not happen, but must be handled in python
+            # parsers job
+            eprint("Should not happen, parsers job!")
+            exit(RESULT_ERR_INTERNAL)
+
+        if name in frame:
+            eprint('DEFVAR variable is already defined: ', var.value)
+            exit(RESULT_ERR_SEMANTICS)
+
+        frame[name] = TypedValue(Type.UNDEF, None)
+
+
+    def get_var(self, var):
+        (frame_id, name) = tuple(var.value.split('@', 2))
+
+        if frame_id == 'GF':
+            frame = self.framestack[0]
+        elif frame_id == 'LF':
+            if len(self.framestack) == 1:
+                eprint("No LF available")
+                exit(RESULT_ERR_FRAME_NONEXISTENT)
+            frame = self.framestack[-1]
+        elif frame_id == 'TF':
+            if self.tempframe is None:
+                eprint("TF is not initialized")
+                exit(RESULT_ERR_FRAME_NONEXISTENT)
+            frame = self.tempframe
+        else:
+            exit(7) # TODO
+
+        if name not in frame:
+            exit(RESULT_ERR_UNDEFINED_VAR)
+
+        return frame[name]
+
+    def resolve_symbol(self, symb, require_set = True):
+        """
+        If symbol is a variable resolves it to its actual value and type
+        """
+        if symb.type == Type.VAR:
+            symb = self.get_var(symb)
+            if require_set and symb.value is None:
+                exit(RESULT_ERR_MISSING_VALUE)
+        return symb
+
+    def pushlocal(self):
+        if self.tempframe is None:
+            exit(RESULT_ERR_FRAME_NONEXISTENT)
+
+        self.framestack.append(self.tempframe)
+        self.tempframe = None
+
+    def poplocal(self):
+        if len(self.framestack) == 1:
+            eprint("POPFRAME: No available LF")
+            exit(RESULT_ERR_FRAME_NONEXISTENT)
+
+        self.tempframe = self.framestack.pop()
+
+    def create_frame(self):
+        self.tempframe = {}
+
+
 
 datastack = []
 callstack = []
-framestack = []
-# add global frame
-framestack.append({})
-# temporary frame (TF)
-tempframe = None
-
 labelmap = {}
 
 pc = 0 # program counter
@@ -496,13 +536,14 @@ while pc < len(instructions):
             exit(RESULT_ERR_SEMANTICS)
         labelmap[label] = pc
 
+frames = Frames()
 pc = 0
 while pc < len(instructions):
     instr: Instruction = instructions[pc]
     pc = pc + 1
 
     if "DEFVAR" == instr.opcode:
-        exec_defvar(instr.args[0], framestack, tempframe)
+        frames.defvar(instr.args[0])
 
     elif "MOVE" == instr.opcode:
         dest = instr.args[0]
@@ -511,11 +552,11 @@ while pc < len(instructions):
         if (src.value == None):
             src.value = ''
 
-        dest = get_var(dest, framestack, tempframe)
+        dest = frames.get_var(dest)
         if dest is None:
             exit(RESULT_ERR_UNDEFINED_VAR)
 
-        src = resolve_symbol(src, framestack, tempframe)
+        src = frames.resolve_symbol(src)
         dest.type = src.type
         dest.value = src.value
 
@@ -535,25 +576,17 @@ while pc < len(instructions):
         pc = callstack.pop()
 
     elif "EXIT" == instr.opcode:
-        exit_code = resolve_symbol(instr.args[0], framestack, tempframe)
+        exit_code = frames.resolve_symbol(instr.args[0])
         exec_exit(exit_code)
 
     elif "CREATEFRAME" == instr.opcode:
-        tempframe = {}
+        frames.create_frame()
 
     elif "PUSHFRAME" == instr.opcode:
-        if tempframe is None:
-            exit(RESULT_ERR_FRAME_NONEXISTENT)
-
-        framestack.append(tempframe)
-        tempframe = None
+        frames.pushlocal()
 
     elif "POPFRAME" == instr.opcode:
-        if len(framestack) == 1:
-            eprint("POPFRAME: No available LF")
-            exit(RESULT_ERR_FRAME_NONEXISTENT)
-
-        tempframe = framestack.pop()
+        frames.poplocal()
 
     elif "JUMP" == instr.opcode:
         label = instr.args[0].value
@@ -562,59 +595,59 @@ while pc < len(instructions):
     elif "JUMPIFEQ" == instr.opcode:
         label, sym1, sym2 = tuple(instr.args)
         addr = jump(labelmap, label.value)
-        if are_eq(sym1, sym2, framestack, tempframe):
+        if are_eq(sym1, sym2, frames):
             pc = addr
 
     elif "JUMPIFNEQ" == instr.opcode:
         label, sym1, sym2 = tuple(instr.args)
         addr = jump(labelmap, label.value)
-        if not are_eq(sym1, sym2, framestack, tempframe):
+        if not are_eq(sym1, sym2, frames):
             pc = addr
 
     elif "READ" == instr.opcode:
         dest, type = tuple(instr.args)
-        dest = get_var(dest, framestack, tempframe)
+        dest = frames.get_var(dest)
         exec_read(dest, Type[type.value.upper()])
 
     elif "WRITE" == instr.opcode:
-        arg = resolve_symbol(instr.args[0], framestack, tempframe)
+        arg = frames.resolve_symbol(instr.args[0])
         exec_write(arg)
 
     elif "CONCAT" == instr.opcode:
-        exec_binary(instr, exec_concat, framestack, tempframe)
+        exec_binary(instr, exec_concat, frames)
 
     elif "STRLEN" == instr.opcode:
         dest, symb = tuple(instr.args)
-        symb = resolve_symbol(symb, framestack, tempframe)
+        symb = frames.resolve_symbol(symb)
 
         if symb.type != Type.STRING:
             exit(RESULT_ERR_TYPE_COMPAT)
 
-        dest = get_var(dest, framestack, tempframe)
+        dest = frames.get_var(dest)
         dest.type = Type.INT
         dest.value = len(symb.value)
 
     elif "GETCHAR" == instr.opcode:
-        exec_binary(instr, exec_getchar, framestack, tempframe)
+        exec_binary(instr, exec_getchar, frames)
 
     elif "SETCHAR" == instr.opcode:
-        exec_binary(instr, exec_setchar, framestack, tempframe)
+        exec_binary(instr, exec_setchar, frames)
 
     elif "TYPE" == instr.opcode:
         dest, symb = tuple(instr.args)
 
-        symb = resolve_symbol(symb, framestack, tempframe, require_set=False)
+        symb = frames.resolve_symbol(symb, require_set=False)
         if symb.value is None:
             symb.type = Type.UNDEF
 
-        dest = get_var(dest, framestack, tempframe)
+        dest = frames.get_var(dest)
         # THIS MUST BE CALLED IN THIS ORDER
         # because dest and symb might resolve to the same variable
         dest.value = symb.type
         dest.type = Type.STRING
 
     elif "PUSHS" == instr.opcode:
-        symb = resolve_symbol(instr.args[0], framestack, tempframe)
+        symb = frames.resolve_symbol(instr.args[0])
         datastack.append(symb)
 
     elif "POPS" == instr.opcode:
@@ -622,17 +655,17 @@ while pc < len(instructions):
             exit(RESULT_ERR_MISSING_VALUE)
 
         dest = instr.args[0]
-        dest = get_var(dest, framestack, tempframe)
+        dest = frames.get_var(dest)
         item = datastack.pop()
         dest.type = item.type
         dest.value = item.value
 
     elif "ADD" == instr.opcode:
-        exec_artihmetic(instr, framestack, tempframe, lambda a, b: a + b)
+        exec_artihmetic(instr, frames, lambda a, b: a + b)
     elif "SUB" == instr.opcode:
-        exec_artihmetic(instr, framestack, tempframe, lambda a, b: a - b)
+        exec_artihmetic(instr, frames, lambda a, b: a - b)
     elif "MUL" == instr.opcode:
-        exec_artihmetic(instr, framestack, tempframe, lambda a, b: a * b)
+        exec_artihmetic(instr, frames, lambda a, b: a * b)
     elif "IDIV" == instr.opcode:
         def op(dest, a, b):
             if b.type == Type.INT and b.value == 0:
@@ -643,7 +676,7 @@ while pc < len(instructions):
             else:
                 exit(RESULT_ERR_TYPE_COMPAT)
 
-        exec_binary(instr, op, framestack, tempframe)
+        exec_binary(instr, op, frames)
 
     elif "LT" == instr.opcode:
         def lt(a, b):
@@ -651,7 +684,7 @@ while pc < len(instructions):
                 return a.value < b.value
             else:
                 exit(RESULT_ERR_TYPE_COMPAT)
-        exec_relational(instr, framestack, tempframe, lt)
+        exec_relational(instr, frames, lt)
 
     elif "GT" == instr.opcode:
         def gt(a, b):
@@ -659,7 +692,7 @@ while pc < len(instructions):
                 return a.value > b.value
             else:
                 exit(RESULT_ERR_TYPE_COMPAT)
-        exec_relational(instr, framestack, tempframe, gt)
+        exec_relational(instr, frames, gt)
 
     elif "EQ" == instr.opcode:
         def eq(a, b):
@@ -672,17 +705,17 @@ while pc < len(instructions):
             else:
                 exit(RESULT_ERR_TYPE_COMPAT)
 
-        exec_relational(instr, framestack, tempframe, eq)
+        exec_relational(instr, frames, eq)
     elif "AND" == instr.opcode:
-        exec_logical(instr, framestack, tempframe, lambda a, b: a and b)
+        exec_logical(instr, frames, lambda a, b: a and b)
     elif "OR" == instr.opcode:
-        exec_logical(instr, framestack, tempframe, lambda a, b: a or b)
+        exec_logical(instr, frames, lambda a, b: a or b)
     elif "NOT" == instr.opcode:
         dest, symb = tuple(instr.args)
-        symb = resolve_symbol(symb, framestack, tempframe)
+        symb = frames.resolve_symbol(symb)
 
         if symb.type == Type.BOOL:
-            dest = get_var(dest, framestack, tempframe)
+            dest = frames.get_var(dest)
             dest.type = Type.BOOL
             dest.value = not symb.value
         else:
@@ -690,15 +723,15 @@ while pc < len(instructions):
 
     elif "INT2CHAR" == instr.opcode:
         dest, symb = tuple(instr.args)
-        symb = resolve_symbol(symb, framestack, tempframe)
-        dest = get_var(dest, framestack, tempframe)
+        symb = frames.resolve_symbol(symb)
+        dest = frames.get_var(dest)
         exec_int2char(dest, symb)
 
     elif "STRI2INT" == instr.opcode:
-        exec_binary(instr, exec_stri2int, framestack, tempframe)
+        exec_binary(instr, exec_stri2int, frames)
 
     elif "DPRINT" == instr.opcode:
-        symb = resolve_symbol(instr.args[0], framestack, tempframe)
+        symb = frames.resolve_symbol(instr.args[0])
         eprint(symb.value)
 
     elif "BREAK" == instr.opcode:
