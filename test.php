@@ -1,5 +1,4 @@
 <?php
-// TODO counters
 define("RESULT_OK", 0);
 define("RESULT_ERR_MISSING_ARG", 10);
 define("RESULT_ERR_INVALID_ARGS", 10);
@@ -12,14 +11,19 @@ define("RESULT_ERR_INTERNAL", 99);
 // test output directory
 const TEST_OUT_DIR = "test-out/";
 
-$directory = ".";
-$recursive = false;
-$parser = "./parse.php";
-$interpret = "./interpret.py";
-$parseonly = false;
-$intonly = false;
-$jexampath = "/pub/courses/ipp/jexamxml/";
-$clean = true;
+/**
+ * Contains program arguments and their default value
+ */
+class Arguments {
+    public $directory = ".";
+    public $recursive = false;
+    public $test_parser = true;
+    public $test_interpret = true;
+    public $parser = "./parse.php";
+    public $interpret = "./interpret.py";
+    public $jexampath = "/pub/courses/ipp/jexamxml/";
+    public $clean = true;
+}
 
 /**
  * Prints string to STDERR
@@ -28,6 +32,10 @@ function eprint(string $data, ?int $length = null): int|false {
     return fwrite(STDERR, $data, $length);
 }
 
+$parseonly = false;
+$intonly = false;
+
+$args = new Arguments;
 foreach($argv as $arg) {
     $a = explode("=", $arg, 2);
 
@@ -36,16 +44,16 @@ foreach($argv as $arg) {
             //TODO help text
             exit(RESULT_OK);
         case "--directory":
-            $directory = $a[1];
+            $args->directory = $a[1];
             break;
         case "--recursive":
-            $recursive = true;
+            $args->recursive = true;
             break;
         case "--parse-script":
-            $parser = $a[1];
+            $args->parser = $a[1];
             break;
         case "--int-script":
-            $interpret = $a[1];
+            $args->interpret = $a[1];
             break;
         case "--parse-only":
             $parseonly = true;
@@ -54,10 +62,10 @@ foreach($argv as $arg) {
             $intonly = true;
             break;
         case "--jexampath":
-            $jexampath = $a[1];
+            $args->jexampath = $a[1];
             break;
         case "--noclean":
-            $clean = false;
+            $args->clean = false;
             break;
         case "test.php":
         case "./test.php":
@@ -69,20 +77,23 @@ foreach($argv as $arg) {
     }
 }
 
+/**
+ * If missing, appends backslash to path
+ */
 function ensure_trailing_slash(&$path) {
     if (substr($path, -1) != "/") {
         $path .= "/";
     }
 }
 
-ensure_trailing_slash($directory);
-if (!file_exists($directory)) {
-    eprint("Specified --directory does not exist: $directory\n");
+ensure_trailing_slash($args->directory);
+if (!file_exists($args->directory)) {
+    eprint("Specified --directory does not exist: $args->directory\n");
     exit(RESULT_ERR_MISSING_FILE);
 }
-if (!is_dir($directory)) {
-    eprint("Specified --directory is not a directory: $directory\n");
-    exit(RESULT_ERR_MISSING_FILE);
+if (!is_dir($args->directory)) {
+    eprint("Specified --directory is not a directory: $args->directory\n");
+    exit(RESULT_ERR_MISSING_FILE); // TODO nema to byt error opening in file?
 }
 
 if ($parseonly && $intonly) {
@@ -90,44 +101,47 @@ if ($parseonly && $intonly) {
     exit(RESULT_ERR_INVALID_ARGS);
 }
 
-$test_parser = !$intonly;
-$test_interpret = !$parseonly;
+$args->test_parser = !$intonly;
+$args->test_interpret = !$parseonly;
 
-if ($parseonly || !$intonly) {
-    if (!file_exists($parser)) {
-        eprint("Parser does not exist: $parser!\n");
+if ($args->test_parser) {
+    if (!file_exists($args->parser)) {
+        eprint("Parser does not exist: $args->parser!\n");
         exit(RESULT_ERR_MISSING_FILE);
     }
 }
 
-if ($parseonly || !$intonly) {
-    if (!file_exists($interpret)) {
-        eprint("Interpreter does not exist: $interpret!\n");
+if ($args->test_interpret) {
+    if (!file_exists($args->interpret)) {
+        eprint("Interpreter does not exist: $args->interpret!\n");
         exit(RESULT_ERR_MISSING_FILE);
     }
 }
 
-ensure_trailing_slash($jexampath);
-if (!file_exists($jexampath."jexamxml.jar")) {
-    eprint("jexamxml does not exist: $jexampath"."jexamxml.jar!\n");
+ensure_trailing_slash($args->jexampath);
+if (!file_exists($args->jexampath."jexamxml.jar")) {
+    eprint("jexamxml does not exist: $args->jexampath"."jexamxml.jar!\n");
     exit(RESULT_ERR_MISSING_FILE);
 }
 
 /*
- * @param test path/filename path and filename of the test files, path is relative to the tests directory, filename is without extension
- * @param outfile path/filename path and filename of the output files, path is relative to the tests directory, filename is without extension
+ * @brief Executes one test case
+ *
+ * @param test path/filename path and filename of the test files,
+ * path is relative to the tests directory, filename is without extension
+ * @param outfile path/filename path and filename of the output files,
+ * path is relative to the tests directory, filename is without extension
  * @return false if test execution failed, true otherwise
  */
-function exec_test($test, $outfile) {
-    global $parser, $interpret, $test_parser, $test_interpret, $jexampath, $clean;
+function exec_test($test, $outfile, $args) {
 
     eprint("Running test: $test\n");
-    $command = "php8.1 $parser < $test.src > $outfile.xml";
+
+    $command = "php8.1 $args->parser < $test.src > $outfile.xml";
     if (exec($command, result_code: $retcode) === false) {
         eprint("Failed executing shell command: $command $\n");
-        return false;
+        exit(RESULT_ERR_INTERNAL);
     }
-
     // get expected return code from rc file
     $expect_rc = 0; // implicit if missing
     $test_rc = $test.".rc";
@@ -137,7 +151,7 @@ function exec_test($test, $outfile) {
             eprint("Failed opening .rc file\n");
             exit(RESULT_ERR_OPENING_IN_FILE);
         }
-        fscanf($f, "%d", $expect_rc); //TODO error checking
+        fscanf($f, "%d", $expect_rc);
         fclose($f);
     } else {
         eprint("File $test_rc missing, generating it...\n");
@@ -154,15 +168,18 @@ function exec_test($test, $outfile) {
     if (!file_exists($test_out)) {
         eprint("File $test_out missing, generating it...\n");
         fopen($test_out, 'c');
+        fclose($test_out);
     }
 
     $test_in = $test.".in";
     if (!file_exists($test_in)) {
         eprint("File $test_in missing, generating it...\n");
         fopen($test_in, 'c');
+        fclose($test_in);
     }
 
-    if ($test_parser && !$test_interpret) {
+    $passed = false;
+    if ($args->test_parser && !$args->test_interpret) {
         // parser only
         eprint("Expected: ".$expect_rc." got: ".$retcode."\n");
 
@@ -170,28 +187,30 @@ function exec_test($test, $outfile) {
             eprint("Comparing outputs...\n");
             // compare parser xml output
             $expect_out = $test.".out";
-            $command = "java -jar $jexampath"."jexamxml.jar $outfile.xml $expect_out";
+            $command = "java -jar $args->jexampath"."jexamxml.jar $outfile.xml $expect_out";
             if (exec($command, result_code: $xml_rc) === false) {
                 eprint("Failed executing jexamxml\n");
-                return false;
+                exit(RESULT_ERR_INTERNAL);
             }
+            $passed = $xml_rc == 0;
             generate_html($test, true, $xml_rc == 0);
         } else if ($expect_rc != $retcode) {
             generate_html($test, false, false);
         } else {
+            $passed = true;
             generate_html($test, true, true);
         }
     }
-    if ($test_interpret) {
-        if ($test_parser)
+    if ($args->test_interpret) {
+        if ($args->test_parser)
             $test_src = $outfile.".xml";
         else
-            $test_src = $test.".src";
+            $test_src = $test.".src"; // --int-only
 
-        $command = "python3.8 $interpret --input=$test_in < $test_src > $outfile.out";
+        $command = "python3.8 $args->interpret --input=$test_in < $test_src > $outfile.out";
         if (exec($command, result_code: $int_rc) === false) {
             eprint("Failed executing interpreter\n");
-            return false;
+            exit(RESULT_ERR_INTERNAL);
         }
         eprint("Expected: ".$expect_rc." got: ".$int_rc."\n");
         if ($expect_rc == 0 && $int_rc == 0) {
@@ -201,29 +220,41 @@ function exec_test($test, $outfile) {
             $command = "diff -Z $outfile.out $test.out";
             if (exec($command, result_code: $diff_rc) === false) {
                 eprint("Failed executing diff, exit code: $diff_rc\n");
-                return false;
+                exit(RESULT_ERR_INTERNAL);
             }
+            $passed = $diff_rc == 0;
             generate_html($test, true, $diff_rc == 0);
-        } elseif ($expect_rc == $int_rc) {
-            generate_html($test, true, true);
         } else {
-            generate_html($test, false, true);
+            $passed = $expect_rc == $int_rc;
+            generate_html($test, $expect_rc == $int_rc, true);
         }
 
-        if ($clean) {
+        if ($args->clean) {
             unlink($outfile.".out");
         }
     }
-    if ($clean) {
+    if ($args->clean) {
         unlink($outfile.".xml");
     }
-    return true;
+    return $passed;
 }
 
-function exec_tests_rec($dir, $path, $recursive)
+/*
+ * Contains stats about execution of tests
+ */
+class Stats {
+    public $total = 0;
+    public $passed = 0;
+}
+
+/*
+ * @brief Execute tests in the given directory
+ * and if running with --recursive it's subdirectories too
+ */
+function exec_tests_rec($dir, $path, $args, &$stats)
 {
-    global $clean;
     eprint("In dir: $dir path: $path\n");
+
     $files = scandir($dir.$path);
     if (!$files) {
         eprint("Failed opening directory: ".$dir.$path."\n");
@@ -234,17 +265,13 @@ function exec_tests_rec($dir, $path, $recursive)
 
         if (is_dir($dir.$path.$file)) {
             // descend into dir
-            if ($recursive && $file != "." && $file != "..") {
-                exec_tests_rec($dir, $path.$file."/", $recursive);
-                if ($clean) {
-                    // remove test dir
-                    rmdir(TEST_OUT_DIR.$path.$file);
-                }
+            if ($args->recursive && $file != "." && $file != "..") {
+                exec_tests_rec($dir, $path.$file."/", $args, $stats);
             }
         } elseif (is_file($dir.$path.$file)) {
             // exec the test
-            $extension = pathinfo($file, PATHINFO_EXTENSION);
             $filename = pathinfo($file, PATHINFO_FILENAME);
+            $extension = pathinfo($file, PATHINFO_EXTENSION);
             if ($extension == "src") {
                 // prepare test output directory
                 $out_dir = TEST_OUT_DIR.$path;
@@ -252,22 +279,66 @@ function exec_tests_rec($dir, $path, $recursive)
                     mkdir($out_dir, recursive: true);
 
                 $out_filename = $out_dir.$filename; // out file without extension
-                $result = exec_test($dir.$path.$filename, $out_filename);
-                if ($result === false)
-                    eprint("WARNING: Failed executing test, continuing with next one...\n");
+                $result = exec_test($dir.$path.$filename, $out_filename, $args);
+                if ($result) {
+                    $stats->passed++;
+                    eprint("PASSED\n");
+                } else {
+                    eprint("FAILED\n");
+                }
+                $stats->total++;
             }
         } else {
             eprint("File is not a regular file or directory: $file\n");
         }
+    }
+    if ($args->clean) {
+        // current dir
+        rmdir(TEST_OUT_DIR.$path);
     }
 }
 
 function html_begin() {
     $header =
     '<!DOCTYPE html>
-        <html>
+    <html>
+        <head>
+        <style>
+            table {
+                float: left;
+                border-collapse: collapse;
+                border: 1px solid;
+                margin: 10px;
+            }
+
+            td, th {
+                padding-left: 8px;
+                padding-right: 8px;
+            }
+
+            table.results {
+                border-collapse: collapse;
+                border: 1px solid;
+            }
+            table.results th {
+                border: solid 1px;
+            }
+            table.results td {
+                border-right: solid 1px;
+                border-left: solid 1px;
+            }
+            table.results tr:nth-child(even) { background-color: #f2f2f2; }
+            table.results td:nth-child(2) { text-align: center; }
+
+            table.stats th {
+                text-align: left;
+                padding-left: 4px;
+            }
+            table.stats td:nth-child(2) { text-align: center; }
+        </style>
+        </head>
         <body>
-            <table>
+            <table class="results" >
                 <tr>
                     <th>Test</th>
                     <th>Result</th>
@@ -282,24 +353,23 @@ function html_end() {
     print($footer);
 }
 
-// TODO nicer html
 function generate_html($testpath, $good_rc, $good_out) {
+    $row = "<tr>
+        <td>$testpath</td>";
+
     if (!$good_rc) {
-        $result = "Failed";
+        $row = $row."<td style=\"background-color: #ffcdd0;\">Failed</td>";
         $desc = "Bad exit code";
     } elseif (!$good_out) {
-        $result = "Failed";
+        $row = $row."<td style=\"background-color: #ffcdd0;\">Failed</td>";
         $desc = "Bad output";
     } else {
-        $result = "Passed";
+        $row = $row."<td style=\"background-color: #c2ffd7;\">Passed</td>";
         $desc = "";
     }
 
-    $row = "<tr>
-        <td>$testpath</td>
-        <td>$result</td>
-        <td>$desc</td>
-    </tr>";
+    $row = $row."<td>$desc</td>
+            </tr>";
     print($row);
 }
 
@@ -310,8 +380,34 @@ if (!file_exists(TEST_OUT_DIR)) {
 
 html_begin();
 
-eprint("Running in: $directory\n");
-exec_tests_rec($directory, "", $recursive);
+eprint("Running in: $args->directory\n");
+$stats = new Stats;
+exec_tests_rec($args->directory, "", $args, $stats);
 
-html_end();
+eprint("Total: $stats->total\n");
+eprint("Passed: $stats->passed\n");
+
+$failed = $stats->total - $stats->passed;
+$results = "
+</table>
+<table class=\"stats\">
+    <tr>
+    <th style=\"border: solid 1px; text-align: center;\" colspan=\"2\">Summary</th>
+    </tr>
+    <tr>
+        <th>Total:</th>
+        <td>$stats->total</td>
+    </tr>
+    <tr>
+        <th>Passed:</th>
+        <td>$stats->passed</td>
+    </tr>
+    <tr>
+        <th>Failed:</th>
+        <td>$failed</td>
+    </tr>
+</table>
+</body>
+</html>";
+print($results);
 ?>
