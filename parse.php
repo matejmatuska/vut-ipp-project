@@ -79,7 +79,7 @@ function check_type($type) {
 function check_literal($lit) {
     return preg_match("/^int@[+-]?[0-9]+(_[0-9]+)*$/", $lit)            // decimal
         || preg_match("/^int@0[xX][0-9a-fA-F]+(_[0-9a-fA-F]+)*/", $lit) // hexadecimal
-        || preg_match("/^int@0[oO]?[0-7]+(_[0-7]+)*", $lit)             // octal
+        || preg_match("/^int@0[oO]?[0-7]+(_[0-7]+)*/", $lit)             // octal
         || preg_match('/^string@(\\\\\d\d\d|[^\x00-\x20\x23\x5C])*$/u', $lit)
         || $lit == "bool@true" || $lit == "bool@false"
         || $lit == "nil@nil";
