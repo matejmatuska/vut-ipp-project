@@ -34,7 +34,15 @@ for arg in sys.argv:
     if arg[0] == "interpret.py" or arg[0] == "./interpret.py":
         pass # no-op
     elif arg[0] == "--help":
-        # TODO print help
+        print('''Usage: python3 interpret.py {--help|[--source|--input]}
+
+Options:
+--help			Print this message and exit
+--source=file	Input file with source code in XML format
+--input=file	File with inputs for runtime exection of the program
+
+At least one of --source and --input must be specified
+If one is left unspecified standard input will be used''')
         exit(RESULT_OK);
 
     elif arg[0] == "--source":
@@ -168,18 +176,17 @@ def xml_parse_arg(arg):
         if value is None:
             value = ''
         else:
-            def repl(match):
+            def replace(match):
                 x = match.group(0)
                 h = '\\x{:02x}'.format(int(x[2:]))
                 return h.encode().decode('unicode-escape')
 
             regex = r"\\\d\d\d"
-            value = re.sub(regex, repl, value)
+            value = re.sub(regex, replace, value)
 
     elif type == 'nil':
         value = 'nil'
 
-    # TODO
     return TypedValue(Type[type.upper()], value)
 
 
@@ -190,33 +197,6 @@ def jump(labelmap, label):
     else:
         eprint("JUMP: Undefined label: ", label)
         exit(RESULT_ERR_SEMANTICS)
-
-
-# Implementation of DEFVAR instruction
-# Exits with error if variable is already defined
-def exec_defvar(arg, framestack, tempframe):
-    (frame_id, name) = tuple(arg.value.split('@', 2))
-
-    if frame_id == 'GF':
-        frame = framestack[0]
-    elif frame_id == 'LF':
-        if len(framestack) == 1:
-            exit(RESULT_ERR_FRAME_NONEXISTENT)
-        frame = framestack[-1]
-    elif frame_id == 'TF':
-        if tempframe is None:
-            exit(RESULT_ERR_FRAME_NONEXISTENT)
-        frame = tempframe
-    else:
-        # should not happen, but must be handled in python, parsers job
-        eprint("Should not happen, parsers job!")
-        exit(RESULT_ERR_INTERNAL)
-
-    if name in frame:
-        eprint('DEFVAR variable is already defined: ', arg.value)
-        exit(RESULT_ERR_SEMANTICS)
-
-    frame[name] = TypedValue(Type.UNDEF, None)
 
 
 # Implementation of EXIT instruction
@@ -480,7 +460,10 @@ class Frames:
                 exit(RESULT_ERR_FRAME_NONEXISTENT)
             frame = self.tempframe
         else:
-            exit(7) # TODO
+            # should not happen, but must be handled in python
+            # parsers job
+            eprint("Should not happen, parsers job!")
+            exit(RESULT_ERR_INTERNAL)
 
         if name not in frame:
             exit(RESULT_ERR_UNDEFINED_VAR)
@@ -513,7 +496,6 @@ class Frames:
 
     def create_frame(self):
         self.tempframe = {}
-
 
 
 datastack = []
@@ -704,8 +686,8 @@ while pc < len(instructions):
                 return a.value == b.value
             else:
                 exit(RESULT_ERR_TYPE_COMPAT)
-
         exec_relational(instr, frames, eq)
+
     elif "AND" == instr.opcode:
         exec_logical(instr, frames, lambda a, b: a and b)
     elif "OR" == instr.opcode:
